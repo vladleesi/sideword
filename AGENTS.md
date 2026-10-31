@@ -1,6 +1,6 @@
 # Working agreement
 
-Rules imported once from [agent-guidelines v1.5.0](https://github.com/vladleesi/agent-guidelines/tree/v1.5.0), commit `11f8f36e0308d0acc07b1352a8fa68cc137e6638` (MIT; [notice](THIRD_PARTY_NOTICES.md)).
+Rules imported once from [agent-guidelines v1.6.0](https://github.com/vladleesi/agent-guidelines/tree/v1.6.0), commit `32605b784bb6a530a38344685e8a6aa7f164d2fa` (MIT; [notice](THIRD_PARTY_NOTICES.md)).
 Selected modules: general, agent-workflow, testing, security, git, ci, release, deployment, backend, python, frontend.
 
 These instructions apply to this repository and its descendants. Project-specific rules and recorded decisions take precedence over imported defaults. This guideline collection must not be fetched, compared with upstream, or updated unless explicitly requested; attribution links grant no upstream access.
@@ -90,6 +90,7 @@ affected deployment configuration before work.
 
 ## Engineering
 
+- Prefer explicit names for identifiers.
 - Reuse existing tools; avoid one-use abstractions, speculative changes and unrelated refactoring.
 
 ## Testing and validation
