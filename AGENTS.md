@@ -1,6 +1,6 @@
 # Working agreement
 
-Rules imported once from [agent-guidelines v1.6.0](https://github.com/vladleesi/agent-guidelines/tree/v1.6.0), commit `32605b784bb6a530a38344685e8a6aa7f164d2fa` (MIT; [notice](THIRD_PARTY_NOTICES.md)).
+Rules imported once from [agent-guidelines v1.7.0](https://github.com/vladleesi/agent-guidelines/tree/v1.7.0), commit `7503de04bca27019b14123187634130f78d8e0d2` (MIT; [notice](THIRD_PARTY_NOTICES.md)).
 Selected modules: general, agent-workflow, testing, security, git, ci, release, deployment, backend, python, frontend.
 
 These instructions apply to this repository and its descendants. Project-specific rules and recorded decisions take precedence over imported defaults. This guideline collection must not be fetched, compared with upstream, or updated unless explicitly requested; attribution links grant no upstream access.
@@ -186,6 +186,9 @@ When relevant: `python -m pip check`, `python -m compileall -q app scripts tests
   environment and inspect the working tree, full intended diff, and all staged
   content. Exclude accidental or unrelated edits and unintended generated output.
   Keep commits coherent and follow project commit conventions.
+- Use the current Git author settings. Never override author identity or add
+  co-author trailers, AI/tool attribution, or other optional commit metadata
+  without explicit user approval.
 - After a successful authorized push, report the locally known commit hash and
   push result. Stop push-only tasks: fetch remote refs or monitor CI, deployments,
   releases, or promotions only on request or as required by an agreed workflow.
