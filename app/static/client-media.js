@@ -6,6 +6,9 @@
   const MAX_DIMENSION = 4096;
   const MAX_PIXELS = 4_000_000;
   const MAX_ACTIVE = 3;
+  // Bounds for locally optimizing oversized images before sending.
+  const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
+  const MAX_SOURCE_PIXELS = 50_000_000;
   const TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
   // Optional metadata is CRC/boundary checked, then omitted from the decoder's copy.
   const PNG_METADATA = new Set(["bKGD", "iCCP", "cICP", "eXIf", "iTXt", "iDOT", "tEXt", "zTXt"]);
@@ -234,6 +237,95 @@
     } catch { return null; }
   }
 
+  // Copies the input, validates that private snapshot completely, then builds a typed Blob.
+  function previewBlob(supplied, mime) {
+    if (!(supplied instanceof Uint8Array) || supplied.length > MAX_BYTES) return null;
+    const bytes = new Uint8Array(supplied), preview = [];
+    const info = inspect(bytes, mime, preview);
+    return info ? { info, blob: new Blob(preview.length ? preview : [bytes], { type: info.mime }) } : null;
+  }
+
+  // Native decoders must agree with the validated header (JPEG may apply EXIF rotation).
+  function decodedMatches(image, info) {
+    const width = image.naturalWidth, height = image.naturalHeight;
+    return dimensions(width, height) && (width === info.width && height === info.height
+      || info.mime === "image/jpeg" && width === info.height && height === info.width);
+  }
+
+  // Header-only signature and size check, so huge or mislabeled sources are never decoded.
+  function sourceDimensions(bytes) {
+    if (!(bytes instanceof Uint8Array) || bytes.length < 30) return null;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (text(bytes, 0, 8) === "\x89PNG\r\n\x1a\n" && text(bytes, 12, 4) === "IHDR") {
+      return { mime: "image/png", width: view.getUint32(16), height: view.getUint32(20) };
+    }
+    if (text(bytes, 0, 4) === "RIFF" && text(bytes, 8, 4) === "WEBP") {
+      const chunk = text(bytes, 12, 4), u24 = at => bytes[at] + bytes[at + 1] * 256 + bytes[at + 2] * 65536;
+      if (chunk === "VP8X") return { mime: "image/webp", width: u24(24) + 1, height: u24(27) + 1 };
+      if (chunk === "VP8 " && text(bytes, 23, 3) === "\x9d\x01\x2a") {
+        return { mime: "image/webp", width: view.getUint16(26, true) & 16383, height: view.getUint16(28, true) & 16383 };
+      }
+      if (chunk === "VP8L" && bytes[20] === 47) {
+        const header = view.getUint32(21, true);
+        return { mime: "image/webp", width: (header & 16383) + 1, height: (header >>> 14 & 16383) + 1 };
+      }
+      return null;
+    }
+    if (bytes[0] !== 255 || bytes[1] !== 216) return null;
+    for (let offset = 2, count = 0; count < 1024 && offset + 9 < bytes.length; count++) {
+      if (bytes[offset] !== 255) return null;
+      const marker = bytes[offset + 1];
+      if (marker === 255) { offset++; continue; }
+      if (marker === 217 || marker === 218) return null;
+      if (marker >= 192 && marker <= 207 && ![196, 200, 204].includes(marker)) {
+        return { mime: "image/jpeg", width: view.getUint16(offset + 7), height: view.getUint16(offset + 5) };
+      }
+      offset += 2 + view.getUint16(offset + 2);
+    }
+    return null;
+  }
+
+  // Re-encodes an oversized still image as a smaller JPEG without metadata.
+  // Returns validated bytes, or null when the source is unsupported or cannot fit.
+  async function reduceImage(bytes, mime, maxBytes, isCurrent = () => true) {
+    const source = sourceDimensions(bytes);
+    if (!source || typeof mime !== "string" || (mime && !generic(mime) && mime.toLowerCase() !== source.mime)
+        || bytes.length > MAX_SOURCE_BYTES || !(source.width > 0 && source.height > 0)
+        || source.width * source.height > MAX_SOURCE_PIXELS || typeof createImageBitmap !== "function") return null;
+    const target = Math.min(maxBytes, MAX_BYTES);
+    let bitmap = null;
+    const canvas = document.createElement("canvas");
+    try {
+      // Browsers apply EXIF orientation by default; SVG and other types are never passed here.
+      bitmap = await createImageBitmap(new Blob([bytes], { type: source.mime }));
+      const width = bitmap.width, height = bitmap.height;
+      if (!isCurrent() || !(width > 0 && height > 0) || width * height > MAX_SOURCE_PIXELS) return null;
+      // Start inside recipients' preview limits, then trade quality and size.
+      let scale = Math.min(1, MAX_DIMENSION / width, MAX_DIMENSION / height, Math.sqrt(MAX_PIXELS / (width * height)));
+      const context = canvas.getContext("2d", { alpha: false });
+      for (let attempt = 0; attempt < 8 && context; attempt++, scale *= .75) {
+        canvas.width = Math.max(1, Math.floor(width * scale));
+        canvas.height = Math.max(1, Math.floor(height * scale));
+        context.fillStyle = "#fff"; // JPEG has no alpha; transparent areas become white.
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.imageSmoothingQuality = "high";
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        for (const quality of [.86, .76]) {
+          const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", quality));
+          if (!isCurrent()) return null;
+          if (blob?.type !== "image/jpeg" || blob.size > target) continue;
+          const output = new Uint8Array(await blob.arrayBuffer());
+          return isCurrent() && inspect(output, "image/jpeg") ? output : null;
+        }
+      }
+      return null;
+    } catch { return null; }
+    finally {
+      bitmap?.close?.();
+      canvas.width = canvas.height = 0; // Release the backing store promptly.
+    }
+  }
+
   function createManager(onAvailable = () => {}) {
     const active = new Map();
     const controls = new WeakMap();
@@ -242,13 +334,15 @@
       clearTimeout(record.timer);
       record.image?.removeAttribute("src");
       record.image?.remove();
+      record.frame?.remove();
       if (record.url) { URL.revokeObjectURL(record.url); record.url = null; }
       record.status.textContent = "";
       record.status.className = "media-status";
       if (record.settled && active.delete(record.host)) onAvailable();
     }
     function clear() { for (const record of active.values()) release(record); }
-    function attach(host, bytesProvider, mime) {
+    // onOpen, when supplied, wraps each decoded image in a keyboard-accessible button.
+    function attach(host, bytesProvider, mime, onOpen) {
       if (controls.has(host)) return controls.get(host);
       if (typeof mime !== "string" || (!TYPES.has(mime.toLowerCase()) && !generic(mime))) {
         return Object.assign(() => {}, { load: async () => {}, available: () => false });
@@ -256,12 +350,14 @@
       const status = document.createElement("span");
       status.className = "media-status"; status.setAttribute("role", "status");
       status.textContent = "";
-      if (TYPES.has(mime.toLowerCase())) host.className = "media-preview media-frame";
+      const declared = TYPES.has(mime.toLowerCase());
+      if (declared) host.className = "media-preview media-frame";
       const state = { failed: false };
       const unavailable = () => {
         state.failed = true;
         status.className = "media-status";
-        status.textContent = "";
+        // Declared images explain the fallback; generic files silently stay ordinary downloads.
+        status.textContent = declared ? "Image preview unavailable" : "";
         host.className = "media-preview";
         onAvailable();
       };
@@ -270,23 +366,18 @@
         if (active.size >= MAX_ACTIVE) { status.textContent = ""; return; }
         let record;
         try {
-          const supplied = bytesProvider();
-          if (!(supplied instanceof Uint8Array) || supplied.length > MAX_BYTES) {
-            unavailable(); return;
-          }
-          // Inspect the same private snapshot passed to Blob, even for shared input buffers.
-          const bytes = new Uint8Array(supplied), preview = [];
-          const info = inspect(bytes, mime, preview);
+          // No Blob is created until the entire private snapshot passes validation.
+          const prepared = previewBlob(bytesProvider(), mime);
           const image = document.createElement("img");
-          if (!info || typeof image.decode !== "function") { unavailable(); return; }
+          if (!prepared || typeof image.decode !== "function") { unavailable(); return; }
+          const info = prepared.info;
           record = { host, status, state, image, url: null, cancelled: false, settled: false };
           active.set(host, record);
           // A stable frame exists before decoding, including after history reload.
           host.className = "media-preview media-frame";
-          image.alt = "Attachment preview"; image.className = "media-image";
+          image.alt = "Image attachment"; image.className = "media-image";
           image.decoding = "async"; image.draggable = false;
-          // No Blob is created until the entire snapshot passes validation.
-          record.url = URL.createObjectURL(new Blob(preview.length ? preview : [bytes], { type: info.mime }));
+          record.url = URL.createObjectURL(prepared.blob);
           status.className = "media-status media-loading";
           status.textContent = "Loading image…";
           image.src = record.url;
@@ -294,12 +385,20 @@
           try {
             await image.decode();
             if (record.cancelled || host.isConnected === false) { release(record); return; }
-            const width = image.naturalWidth, height = image.naturalHeight;
-            if (!dimensions(width, height) || !(width === info.width && height === info.height
-                || info.mime === "image/jpeg" && width === info.height && height === info.width)) {
-              throw new Error("Invalid preview dimensions");
+            if (!decodedMatches(image, info)) throw new Error("Invalid preview dimensions");
+            let frame = image;
+            if (typeof onOpen === "function") {
+              frame = document.createElement("button");
+              frame.type = "button"; frame.className = "media-open";
+              frame.setAttribute("aria-label", "Open image full screen");
+              frame.addEventListener("click", event => { event?.stopPropagation?.(); onOpen(frame); });
+              frame.append(image);
             }
-            host.append(image);
+            // Keep keyboard position after an explicit reveal moved focus to this frame.
+            const focused = document.activeElement === host;
+            host.append(frame);
+            record.frame = frame;
+            if (focused && frame !== image) frame.focus({ preventScroll: true });
             status.className = "media-status";
             status.textContent = "";
           } finally { clearTimeout(record.timer); }
@@ -324,5 +423,6 @@
     return Object.freeze({ attach, clear });
   }
   globalThis.SidewordMedia = Object.freeze({ inspect: (bytes, mime) => inspect(bytes, mime), createManager,
-    MAX_BYTES, MAX_DIMENSION, MAX_PIXELS, MAX_ACTIVE });
+    previewBlob, decodedMatches, sourceDimensions, reduceImage, TYPES: Object.freeze([...TYPES]),
+    MAX_BYTES, MAX_DIMENSION, MAX_PIXELS, MAX_ACTIVE, MAX_SOURCE_BYTES, MAX_SOURCE_PIXELS });
 })();

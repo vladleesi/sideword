@@ -121,6 +121,25 @@ permits Blob URLs only for images; no external requests. Unsupported files stay 
 
 Cards omit filenames, put media below optional text and reserve image frames before
 decoding. Restore at latest messages; stop following when the user scrolls away.
+Declared images that fail validation or decoding show an unavailable state.
+
+Incoming images preview automatically unless a device `localStorage` setting selects
+click-to-reveal; hidden images are neither copied to Blob URLs nor decoded until revealed.
+Generic-type files preview only in automatic mode.
+
+The full-screen viewer decodes its own validated copy (one decoder beyond the preview cap),
+never navigates to Blob documents, downloads through the generic path and revokes its URL
+on close, chat switch, session loss or page hide. It confirms nothing and suppresses read
+confirmations for messages underneath.
+
+Pre-send thumbnails read files only after size, transport and peer-key checks; cancel,
+replacement or chat switching discards stale work. Nothing uploads before Send.
+
+JPEG/PNG/WebP images above the chat's sendable size (1 MiB or less in large groups), up
+to 20 MiB and 50 megapixels by header, are re-encoded locally as metadata-free JPEGs
+within preview limits; transparency becomes white. Browser-copied images are PNGs, so
+this lets chat images be pasted back. Output must pass preview validation; Send stays
+disabled until reduction succeeds, and failure removes the selection with an error.
 
 ## Identity checks and local state
 

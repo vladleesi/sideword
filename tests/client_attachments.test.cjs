@@ -301,7 +301,7 @@ test('file selection makes sending explicit, preserves drafts and restores keybo
   assert.equal(app.document.activeElement, app.nodes.get('#message-input'));
 });
 
-test('paste and drop stage exact File objects for review without reading, uploading or changing the text draft', () => {
+test('paste and drop stage exact File objects for review without synchronous reads, uploading or changing the text draft', () => {
   for (const gesture of ['paste', 'drop']) {
     const { app } = protocol();
     const file = {name:'clipboard.png', type:'image/png', size:1048576,

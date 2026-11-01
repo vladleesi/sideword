@@ -12,10 +12,10 @@
   <link rel="preload" href="/static/fonts/IBMPlexSans-SemiBold.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
   <script src="/static/appearance.js?v=2"></script>
-  <link rel="stylesheet" href="/static/client.css?v=32">
+  <link rel="stylesheet" href="/static/client.css?v=34">
   <script src="/static/client-protocol.js?v=5" defer></script>
-  <script src="/static/client-media.js?v=6" defer></script>
-  <script src="/static/client.js?v=46" defer></script>
+  <script src="/static/client-media.js?v=8" defer></script>
+  <script src="/static/client.js?v=49" defer></script>
 </head>
 <body class="messenger">
   <a class="skip-link" href="#workspace">Skip to workspace</a>
@@ -102,7 +102,7 @@
         </div>
         <form id="message-form" class="composer">
           <div id="attachment-preview" class="attachment-selection" hidden>
-            <span class="file-tile" aria-hidden="true">
+            <span id="attachment-tile" class="file-tile" aria-hidden="true">
               <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z M14 2v6h6 M8 13h8 M8 17h5"/></svg>
             </span>
             <div class="attachment-info" role="status" aria-atomic="true">
@@ -115,10 +115,10 @@
             </button>
           </div>
           <input id="attachment-input" type="file" hidden disabled>
-          <button id="attachment-button" class="button subtle icon-button" type="button" aria-label="Attach a file" aria-describedby="attachment-help composer-error" title="Attach, paste or drop a file (up to 1 MiB)" disabled>
+          <button id="attachment-button" class="button subtle icon-button" type="button" aria-label="Attach a file" aria-describedby="attachment-help composer-error" title="Attach, paste or drop a file (up to 1 MiB; larger images are reduced)" disabled>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m21 11.5-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8L15 6.3"/></svg>
           </button>
-          <span id="attachment-help" class="sr-only">Choose, paste or drop one file up to 1 MiB. Add an optional message above the attachment.</span>
+          <span id="attachment-help" class="sr-only">Choose, paste or drop one file up to 1 MiB. Larger JPEG, PNG and WebP images up to 20 MiB are reduced on this device before you send. Add an optional message above the attachment.</span>
           <label class="sr-only" for="message-input">Message</label>
           <textarea id="message-input" maxlength="16000" rows="2" aria-describedby="composer-help composer-error key-change-warning waiting-notice"
                     placeholder="Write a message" disabled></textarea>
@@ -174,6 +174,23 @@
     </div>
   </dialog>
 
+  <dialog id="image-viewer" class="context-dialog image-viewer" aria-labelledby="image-viewer-heading">
+    <div class="dialog-heading">
+      <h2 id="image-viewer-heading">Image</h2>
+      <div class="viewer-controls">
+        <button id="image-zoom-out" class="button subtle" type="button" aria-label="Zoom out" title="Zoom out (−)" disabled>−</button>
+        <button id="image-zoom-fit" class="button subtle" type="button" aria-label="Fitted to screen" title="Fit to screen (0)" disabled>Fit</button>
+        <button id="image-zoom-in" class="button subtle" type="button" aria-label="Zoom in" title="Zoom in (+)" disabled>+</button>
+        <button id="image-download" class="button subtle" type="button">Download</button>
+        <button id="close-image-viewer" class="button subtle" type="button" autofocus>Close</button>
+      </div>
+    </div>
+    <div id="image-stage" class="image-stage" tabindex="0" role="group" aria-label="Image. Use arrow keys to scroll when zoomed.">
+      <p id="image-viewer-status" class="media-status" role="status"></p>
+    </div>
+    <p id="image-viewer-error" class="field-error viewer-error" role="alert"></p>
+  </dialog>
+
   <dialog id="device-settings" class="context-dialog" aria-labelledby="device-settings-heading">
     <div class="dialog-heading">
       <h2 id="device-settings-heading">Device settings</h2>
@@ -196,6 +213,12 @@
         <label><input type="radio" name="appearance" value="light">Light</label>
         <label><input type="radio" name="appearance" value="dark">Dark</label>
         <label><input type="radio" name="appearance" value="system" checked>System</label>
+      </fieldset>
+      <fieldset class="appearance-controls" aria-describedby="image-previews-help">
+        <legend>Incoming images</legend>
+        <label><input id="image-previews-reveal" type="radio" name="image-previews" value="reveal">Click to reveal</label>
+        <label><input id="image-previews-auto" type="radio" name="image-previews" value="auto" checked>Show automatically</label>
+        <p id="image-previews-help" class="muted">JPEG, PNG and WebP previews are decoded only on this device. Other files stay downloads.</p>
       </fieldset>
       <section aria-labelledby="security-heading">
         <h3 id="security-heading">Security information</h3>

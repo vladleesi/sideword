@@ -282,8 +282,9 @@ textarea:disabled { color: var(--muted); }
 .composer.has-attachment #attachment-button { grid-column: 1; grid-row: 2; }
 .composer.has-attachment #send-button { grid-column: 3; grid-row: 2; align-self: center; }
 /* One compact attachment card below an optional text message. */
-.attachment-card { display: grid; grid-template-columns: 28px minmax(0, 1fr) 32px; align-items: center; gap: .15rem .4rem; width: 16.5rem; max-width: 100%; padding: .4rem; border: 1px solid var(--border); border-radius: 6px; }
-.attachment-card > .message-content { grid-column: 1 / -1; grid-row: 1; margin-bottom: .25rem; }
+/* No row gap: hidden text/error rows must not add space, so sender and receiver cards match. */
+.attachment-card { display: grid; grid-template-columns: 28px minmax(0, 1fr) 32px; align-items: center; gap: 0 .4rem; width: 16.5rem; max-width: 100%; padding: .4rem; border: 1px solid var(--border); border-radius: 6px; }
+.attachment-card > .message-content { grid-column: 1 / -1; grid-row: 1; margin-bottom: .4rem; }
 .attachment-card > .message-content[hidden] { display: none; }
 .attachment-card .file-tile { grid-column: 1; grid-row: 2; width: 28px; height: 32px; }
 .attachment-card .attachment-info { grid-column: 2; grid-row: 2; }
@@ -293,11 +294,12 @@ textarea:disabled { color: var(--muted); }
 .attachment-download svg { display: block; width: 16px; height: 16px; pointer-events: none; }
 .attachment-download .sr-only { pointer-events: none; }
 .attachment-card .attachment-download:hover { border-color: var(--control-border); background: var(--surface-alt); }
-.attachment-card .message-footer { position: static; grid-column: 2 / -1; grid-row: 5; justify-self: end; margin: 0; }
+.attachment-card .message-footer { position: static; grid-column: 2 / -1; grid-row: 5; justify-self: end; margin: .3rem 0 0; }
 .attachment-card .message-status { width: 44px; min-height: 24px; }
-.attachment-card .message-content::after { display: none; }
-#composer-error, .attachment-card .field-error { position: relative; margin: .3rem 0 0; padding: .6rem .75rem .6rem 2.1rem; border: 1px solid var(--danger); border-radius: 4px; background: var(--warning-bg); background: color-mix(in srgb, var(--danger) 6%, var(--bg)); color: var(--danger); font-size: .8125rem; line-height: 1.45; overflow-wrap: anywhere; }
-#composer-error::before, .attachment-card .field-error::before { content: "!"; position: absolute; left: .7rem; top: .7rem; display: grid; place-items: center; width: 15px; height: 15px; border: 1px solid currentColor; border-radius: 50%; font-size: .6875rem; font-weight: 600; line-height: 1; }
+/* Outrank the sender-only status spacer, which would add an extra text line in cards. */
+.message.mine .attachment-card > .message-content::after { display: none; }
+#composer-error, .attachment-card .field-error, .viewer-error { position: relative; margin: .3rem 0 0; padding: .6rem .75rem .6rem 2.1rem; border: 1px solid var(--danger); border-radius: 4px; background: var(--warning-bg); background: color-mix(in srgb, var(--danger) 6%, var(--bg)); color: var(--danger); font-size: .8125rem; line-height: 1.45; overflow-wrap: anywhere; }
+#composer-error::before, .attachment-card .field-error::before, .viewer-error::before { content: "!"; position: absolute; left: .7rem; top: .7rem; display: grid; place-items: center; width: 15px; height: 15px; border: 1px solid currentColor; border-radius: 50%; font-size: .6875rem; font-weight: 600; line-height: 1; }
 .attachment-card .field-error { grid-column: 1 / -1; grid-row: 4; }
 .attachment-card .field-error:empty { display: none; }
 .message-status.status-expired, .message-status.status-unavailable { color: var(--danger); }
@@ -309,13 +311,13 @@ textarea:disabled { color: var(--muted); }
 }
 @media (forced-colors: active) {
   .file-tile, #attachment-button, .attachment-card .attachment-download { border-color: ButtonText; }
-  #composer-error, .attachment-card .field-error { border-color: CanvasText; color: CanvasText; background: Canvas; }
+  #composer-error, .attachment-card .field-error, .viewer-error { border-color: CanvasText; color: CanvasText; background: Canvas; }
 }
 
 .conversation.file-drag-over { outline: 2px dashed var(--accent); outline-offset: -5px; }
 .conversation.file-drag-over .composer { background: var(--surface); }
 
-.attachment-card .media-preview { grid-column: 1 / -1; grid-row: 3; min-width: 0; min-height: 0; width: 100%; max-height: 180px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.attachment-card .media-preview { grid-column: 1 / -1; grid-row: 3; margin-top: .4rem; min-width: 0; min-height: 0; width: 100%; max-height: 180px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .media-preview:empty { display: none; }
 .media-status { display: block; color: var(--muted); font-size: .75rem; }
 .media-frame { height: 180px; }
@@ -329,3 +331,31 @@ textarea:disabled { color: var(--muted); }
 
 .attachment-card .file-icon { width: 18px; height: 22px; }
 @media (pointer: coarse) { .attachment-card { grid-template-columns: 28px minmax(0, 1fr) 44px; } .attachment-card .attachment-download { width: 44px; min-height: 44px; } }
+
+/* Image privacy, viewer and composer thumbnails reuse attachment tokens. */
+.button.media-reveal { width: 100%; min-height: 44px; margin-top: .25rem; border-color: var(--border); background: var(--bg); }
+.media-open { display: block; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 4px; background: transparent; cursor: zoom-in; }
+.media-open:focus-visible, .image-stage:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.media-preview:focus { outline: none; }
+.file-tile { position: relative; overflow: hidden; }
+.file-tile.has-thumbnail .file-icon { display: none; }
+.file-tile.media-loading { min-height: 0; gap: 0; }
+.file-tile.media-loading::before { position: absolute; width: 14px; height: 14px; }
+.file-tile.media-loading .file-icon { opacity: .35; }
+.attachment-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
+.context-dialog.image-viewer { width: min(1100px, calc(100% - 1.5rem)); height: calc(100dvh - 2rem); max-width: none; }
+.image-viewer .dialog-heading { flex-wrap: wrap; padding: .5rem .75rem; }
+.image-viewer .dialog-heading h2 { font-size: .9375rem; }
+.viewer-controls { display: flex; flex-wrap: wrap; gap: .35rem; }
+.viewer-controls .button { min-width: 44px; min-height: 44px; }
+.image-stage { display: flex; flex: 1; min-height: 0; overflow: auto; padding: .75rem; background: var(--surface); overscroll-behavior: contain; touch-action: manipulation; }
+.image-stage > * { margin: auto; flex-shrink: 0; }
+.viewer-image { display: block; max-width: none; user-select: none; }
+.image-stage .media-status { padding: 1rem; text-align: center; }
+.image-viewer .viewer-error { margin: .5rem .75rem; }
+.viewer-error:empty { display: none; }
+@media (max-width: 760px) {
+  .context-dialog.image-viewer { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; padding-bottom: env(safe-area-inset-bottom); }
+  .image-stage { padding: .25rem; }
+}
+@media (forced-colors: active) { .media-open:focus-visible, .image-stage:focus-visible { outline-color: Highlight; } }

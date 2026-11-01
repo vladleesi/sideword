@@ -17,6 +17,7 @@ function media({ pending = false, fail = false, width = 2, height = 2 } = {}) {
     removeAttribute(name) { this.attrs.delete(name); if (name === 'src') this.src = ''; }
     addEventListener(name, action) { this.events.set(name, action); }
     click() { return this.events.get('click')({stopPropagation(){}}); }
+    focus() { this.focused = true; }
   }
   const document = { createElement(tag) {
     const node = new Node(tag);
@@ -167,7 +168,7 @@ test('late PNG validation failures never expose partially prepared preview bytes
     assert.equal(app.created(), 0);
     assert.equal(app.blobs.length, 0);
     assert.equal(app.images.some(image => image.src), false);
-    assert.equal(card.status.textContent, '');
+    assert.equal(card.status.textContent, 'Image preview unavailable');
     assert.equal(card.dispose.available(), false);
   }
 });
@@ -179,7 +180,7 @@ test('zero, oversized and excessive-pixel headers are rejected before URL creati
     assert.equal(app.api.inspect(bytes), null);
     const card = app.attach(bytes);
     await card.dispose.load();
-    assert.equal(card.status.textContent, '');
+    assert.equal(card.status.textContent, 'Image preview unavailable');
     assert.equal(card.dispose.available(), false);
   }
   assert.equal(app.created(), 0);
@@ -259,7 +260,7 @@ test('native decode errors and dishonest decoded dimensions leave the download f
     const app = media(options), card = app.attach();
     await card.dispose.load();
     assert.equal(app.urls.size, 0);
-    assert.equal(card.status.textContent, '');
+    assert.equal(card.status.textContent, 'Image preview unavailable');
     assert.equal(card.dispose.available(), false);
     assert.equal(card.host.children.some(node => node.tagName === 'img'), false);
     assert.equal(app.timers.size, 0);
@@ -332,7 +333,7 @@ test('byte-provider and object-URL failures remain local and release reservation
   const host = app.document.createElement('div');
   const dispose = app.manager.attach(host, () => { throw new Error('synthetic-private'); }, 'image/png');
   await dispose.load();
-  assert.equal(host.children[0].textContent, '');
+  assert.equal(host.children[0].textContent, 'Image preview unavailable');
   assert.equal(dispose.available(), false);
   assert.doesNotMatch(host.children[0].textContent, /synthetic-private/);
   const create = app.context.URL.createObjectURL;
@@ -345,4 +346,121 @@ test('byte-provider and object-URL failures remain local and release reservation
   await next.dispose.load();
   assert.equal(app.urls.size, 1);
   app.manager.clear();
+});
+
+test('generic files that fail signatures stay silent download cards', async () => {
+  const app = media(), card = app.attach(new Uint8Array(64), 'application/octet-stream');
+  await card.dispose.load();
+  assert.equal(card.status.textContent, '');
+  assert.equal(card.dispose.available(), false);
+  assert.equal(app.created(), 0);
+});
+
+test('open callbacks wrap decoded images in a labelled button and keep explicit-reveal focus', async () => {
+  const app = media(), opened = [];
+  const host = app.document.createElement('div');
+  app.document.activeElement = host;
+  const dispose = app.manager.attach(host, () => fixtures('valid.png'), 'image/png', trigger => opened.push(trigger));
+  await dispose.load();
+  const button = host.children.at(-1);
+  assert.equal(button.tagName, 'button');
+  assert.equal(button.type, 'button');
+  assert.equal(button.attrs.get('aria-label'), 'Open image full screen');
+  assert.equal(button.children[0].tagName, 'img');
+  assert.equal(button.children[0].alt, 'Image attachment');
+  assert.equal(button.focused, true);
+  let stopped = false;
+  button.events.get('click')({stopPropagation() { stopped = true; }});
+  assert.deepEqual(opened, [button]);
+  assert.equal(stopped, true);
+  dispose();
+  assert.equal(host.children.includes(button), false);
+  assert.equal(app.urls.size, 0);
+});
+
+test('shared preview Blobs copy input and reject conflicting or oversized data', () => {
+  const app = media(), bytes = new Uint8Array(fixtures('valid.webp'));
+  const prepared = app.api.previewBlob(bytes, 'image/webp');
+  assert.equal(prepared.info.mime, 'image/webp');
+  assert.equal(prepared.blob.type, 'image/webp');
+  assert.equal(app.api.previewBlob(bytes, 'image/png'), null);
+  assert.equal(app.api.previewBlob(new Uint8Array(app.api.MAX_BYTES + 1), ''), null);
+  assert.equal(app.api.previewBlob(fixtures('valid.png').toString('base64'), 'image/png'), null);
+  assert.equal(app.api.decodedMatches({naturalWidth: 2, naturalHeight: 2}, prepared.info), true);
+  assert.equal(app.api.decodedMatches({naturalWidth: 2, naturalHeight: 3}, prepared.info), false);
+});
+
+test('source dimensions come from headers only and reject other signatures', () => {
+  const app = media();
+  for (const [name, mime] of [['valid.png', 'image/png'], ['valid.jpg', 'image/jpeg'], ['progressive.jpg', 'image/jpeg'],
+    ['valid.webp', 'image/webp'], ['lossless.webp', 'image/webp'], ['alpha.webp', 'image/webp']]) {
+    const result = app.api.sourceDimensions(new Uint8Array(fixtures(name)));
+    assert.deepEqual([result.mime, result.width, result.height], [mime, 2, 2], name);
+  }
+  const large = new Uint8Array(pngDimensions(8000, 6000));
+  assert.deepEqual([app.api.sourceDimensions(large).width, app.api.sourceDimensions(large).height], [8000, 6000]);
+  assert.equal(app.api.sourceDimensions(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>')), null);
+  assert.equal(app.api.sourceDimensions(new Uint8Array(64)), null);
+});
+
+function reducer(app, { sizes = [], fail = false } = {}) {
+  const log = { decoded: 0, closed: 0, encodes: [], canvases: [] };
+  app.context.createImageBitmap = async blob => {
+    log.decoded++; log.sourceType = blob.type;
+    if (fail) throw new Error('synthetic decode failure');
+    return { width: 6000, height: 4000, close() { log.closed++; } };
+  };
+  const create = app.document.createElement;
+  app.document.createElement = tag => {
+    if (tag !== 'canvas') return create(tag);
+    const canvas = { width: 0, height: 0,
+      getContext: () => ({ fillRect() {}, drawImage() {} }),
+      toBlob(resolve, type, quality) {
+        log.encodes.push([canvas.width, canvas.height, quality]);
+        const size = sizes.shift() ?? 0, bytes = fixtures('valid.jpg');
+        resolve({ type, size: size || bytes.length, arrayBuffer: async () => new Uint8Array(bytes).buffer });
+      } };
+    log.canvases.push(canvas);
+    return canvas;
+  };
+  return log;
+}
+
+test('oversized images reduce within preview limits to a validated JPEG and release decoder resources', async () => {
+  const app = media(), log = reducer(app, { sizes: [2_000_000] });
+  const source = new Uint8Array(pngDimensions(6000, 4000));
+  const output = await app.api.reduceImage(source, 'image/png', 900_000);
+  assert.deepEqual([...output], [...fixtures('valid.jpg')]);
+  assert.equal(log.sourceType, 'image/png');
+  const [width, height] = log.encodes[0];
+  assert.ok(width * height <= app.api.MAX_PIXELS && width <= app.api.MAX_DIMENSION);
+  assert.deepEqual(log.encodes.map(item => item[2]), [.86, .76]);
+  assert.equal(log.closed, 1);
+  assert.deepEqual([log.canvases[0].width, log.canvases[0].height], [0, 0]);
+});
+
+test('image reduction rejects mislabeled, huge, failed, cancelled and unreachable sources', async () => {
+  const png = new Uint8Array(pngDimensions(6000, 4000));
+  let app = media(), log = reducer(app);
+  assert.equal(await app.api.reduceImage(png, 'image/jpeg', 900_000), null);
+  assert.equal(await app.api.reduceImage(new Uint8Array(pngDimensions(10000, 6000)), 'image/png', 900_000), null);
+  assert.equal(await app.api.reduceImage(new TextEncoder().encode('<svg>' + ' '.repeat(64) + '</svg>'), 'image/png', 900_000), null);
+  assert.equal(log.decoded, 0);
+  app = media(); log = reducer(app, { fail: true });
+  assert.equal(await app.api.reduceImage(png, 'image/png', 900_000), null);
+  app = media(); log = reducer(app);
+  assert.equal(await app.api.reduceImage(png, '', 900_000, () => false), null);
+  assert.equal(log.closed, 1);
+  app = media(); log = reducer(app, { sizes: Array(16).fill(2_000_000) });
+  assert.equal(await app.api.reduceImage(png, 'image/png', 900_000), null);
+  assert.equal(log.encodes.length, 16);
+  assert.ok(log.encodes.at(-1)[0] < log.encodes[0][0]);
+  assert.equal(log.closed, 1);
+  app = media(); log = reducer(app);
+  app.context.createImageBitmap = async () => ({ width: 6000, height: 4000, close() {} });
+  const create = app.document.createElement;
+  app.document.createElement = tag => tag === 'canvas' ? { getContext: () => ({ fillRect() {}, drawImage() {} }),
+    toBlob: resolve => resolve({ type: 'image/jpeg', size: 10, arrayBuffer: async () => new Uint8Array([255, 216, 1, 2]).buffer }) }
+    : create(tag);
+  assert.equal(await app.api.reduceImage(png, 'image/png', 900_000), null);
 });

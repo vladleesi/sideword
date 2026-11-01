@@ -1,6 +1,6 @@
 # Security review
 
-**Reviewed:** 2026-10-29 · **Backend:** 0.17.0. Maintainer source/test review;
+**Reviewed:** 2026-10-31 · **Backend:** 0.18.0. Maintainer source/test review;
 not an independent security or cryptographic audit. [Report vulnerabilities](../SECURITY.md).
 
 ## Controls and supporting evidence
@@ -12,7 +12,7 @@ not an independent security or cryptographic audit. [Report vulnerabilities](../
 | Encryption | P-256/HKDF/AES-GCM, non-exportable keys, peer pins and encrypted local history/outbox; [protocol](PROTOCOL.md), [crypto](../tests/client_crypto.test.cjs) |
 | Delivery | Exact owner-bound references, atomic delivery receipts, immutable retries and persistence before ACK; [tests](../tests/client_delivery.test.cjs), [status](../tests/test_message_status.py) |
 | Attachments | Strict payload/size validation, ciphertext-only relay, gesture-only paste/drop and safe explicit downloads; [client](../tests/client_attachments.test.cjs), [relay](../tests/test_attachments.py) |
-| Previews | Automatic visible still-image validation, dimension/resource caps, native decode checks and URL cleanup; [formats/lifecycle](../tests/client_media.test.cjs), [integration](../tests/client_media_integration.test.cjs), [policy](PROTOCOL.md#local-image-previews) |
+| Previews | Optional click-to-reveal mode, still-image validation, dimension/resource caps, native decode checks, viewer/composer URL cleanup and trust checks before pre-send reads; [formats/lifecycle](../tests/client_media.test.cjs), [integration](../tests/client_media_integration.test.cjs), [policy](PROTOCOL.md#local-image-previews) |
 | Detached media | Recipient/session-bound reads, inherited expiry, shared queue quotas and separate durable ACKs; [relay](../tests/test_media_transfer.py), [client](../tests/client_transfers.test.cjs) |
 | Capacity/browser | Bounded requests/queues, CSP, text-only rendering, no-store, CSRF and redacted errors; [guards](../app/guards.py), [tests](../tests/test_security_stages.py) |
 | Build/deployment | Exact-image gates, non-root images, recoverable pre-1.0 resets and verified cleanup; [CI](../.github/workflows/test.yml), [deployment tests](../tests/test_deploy.py) |
@@ -65,6 +65,10 @@ peak memory remain unverified. Header checks cannot eliminate browser decoder vu
 PNG preview copies omit optional profile/text/background metadata; downloads retain originals.
 Scroll regressions cover bounded nearby retention, stable image frames and latest-message
 positioning after history restoration and delayed content resizing.
+Image regressions cover the automatic default, no decoding while hidden, preference persistence/tab sync,
+viewer zoom/keyboard/focus/cleanup, stale viewer and pre-send decodes, peer checks
+before pre-send reads, and header-bounded oversized-image reduction with cancellation. They use DOM fakes. Real browser layout, touch gestures,
+screen-reader output and focus rendering were not checked in a browser.
 Detached-media tests cover metadata-first delivery, independent persistence/ACKs, immutable
 retries, interrupted handoff, routing/content substitution, cancellation and bounded retries.
 Deployment regressions use fake commands and real SQLite to check digest binding,

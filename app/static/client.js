@@ -10,6 +10,10 @@ const IDENTITY_KEY = "identity";
 const HISTORY_PREFIX = "history:";
 const POLL_INTERVAL_MS = 4000;
 const REQUEST_TIMEOUT_MS = 15000;
+// Local display preference only; it never changes delivery, receipts or stored history.
+const IMAGE_PREVIEW_KEY = "sideword-client-image-previews";
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const VIEWER_ZOOM_LEVELS = [1, 1.5, 2, 3, 4];
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -40,6 +44,7 @@ const elements = {
   attachmentLabel: document.querySelector("#attachment-label"),
   attachmentSize: document.querySelector("#attachment-size"),
   attachmentCancel: document.querySelector("#attachment-cancel"),
+  attachmentTile: document.querySelector("#attachment-tile"),
   composerError: document.querySelector("#composer-error"),
   messageForm: document.querySelector("#message-form"),
   messageInput: document.querySelector("#message-input"),
@@ -52,6 +57,15 @@ const elements = {
   sendButton: document.querySelector("#send-button"),
   setupPanel: document.querySelector("#setup-panel"),
   status: document.querySelector("#status-message"),
+  imagePreviewReveal: document.querySelector("#image-previews-reveal"),
+  imagePreviewAuto: document.querySelector("#image-previews-auto"),
+  imageViewer: document.querySelector("#image-viewer"),
+  imageStage: document.querySelector("#image-stage"),
+  imageViewerStatus: document.querySelector("#image-viewer-status"),
+  imageViewerError: document.querySelector("#image-viewer-error"),
+  imageZoomIn: document.querySelector("#image-zoom-in"),
+  imageZoomOut: document.querySelector("#image-zoom-out"),
+  imageZoomFit: document.querySelector("#image-zoom-fit"),
   waitingNotice: document.querySelector("#waiting-notice"),
 };
 
@@ -68,6 +82,13 @@ const mediaFailures = new Map();
 const mediaUploadStates = new Map();
 let mediaTimer = null;
 let previewTimer = null;
+let imagePreviewMode = readImagePreviewMode();
+// In-memory reveals only: reload returns incoming images to the selected privacy mode.
+const revealedImages = new Set();
+let requestedPreview = null;
+const imageViewer = { token: 0, entry: null, chatId: null, trigger: null, image: null, url: null,
+  width: 0, height: 0, zoom: 1 };
+const composerPreview = { token: 0, image: null, url: null, optimizing: false };
 let transferringMedia = false;
 let transferController = null;
 let identity = null;
@@ -182,6 +203,40 @@ elements.messageDetails.addEventListener("close", () => {
 closeOnBackdrop(elements.messageDetails);
 elements.messageDetails.addEventListener("toggle", () => positionMessageDetails(), true);
 elements.detailsDialog.addEventListener("close", refreshVisibleReads);
+closeOnBackdrop(elements.imageViewer);
+document.querySelector("#close-image-viewer").addEventListener("click", () => elements.imageViewer.close());
+elements.imageViewer.addEventListener("close", () => {
+  imageViewer.token++;
+  releaseViewerImage();
+  imageViewer.entry = null;
+  const trigger = imageViewer.trigger;
+  imageViewer.trigger = null;
+  const fallback = elements.messageInput.disabled ? elements.conversationTitle : elements.messageInput;
+  (trigger && trigger.isConnected !== false ? trigger : fallback).focus({ preventScroll: true });
+  refreshVisibleReads();
+});
+elements.imageZoomIn.addEventListener("click", () => stepViewerZoom(1));
+elements.imageZoomOut.addEventListener("click", () => stepViewerZoom(-1));
+elements.imageZoomFit.addEventListener("click", () => setViewerZoom(1));
+elements.imageStage.addEventListener("dblclick", () => setViewerZoom(imageViewer.zoom === 1 ? 2 : 1));
+elements.imageViewer.addEventListener("keydown", event => {
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  const step = { "+": 1, "=": 1, "-": -1, "_": -1 }[event.key];
+  if (step) { event.preventDefault(); stepViewerZoom(step); }
+  else if (event.key === "0") { event.preventDefault(); setViewerZoom(1); }
+});
+document.querySelector("#image-download").addEventListener("click", () => {
+  if (imageViewer.entry?.attachment) downloadAttachment(imageViewer.entry.attachment, elements.imageViewerError);
+});
+elements.imagePreviewReveal.addEventListener("change", () => {
+  if (elements.imagePreviewReveal.checked) applyImagePreviewMode("reveal", true);
+});
+elements.imagePreviewAuto.addEventListener("change", () => {
+  if (elements.imagePreviewAuto.checked) applyImagePreviewMode("auto", true);
+});
+window.addEventListener("storage", event => {
+  if (event.key === IMAGE_PREVIEW_KEY || event.key === null) applyImagePreviewMode(readImagePreviewMode());
+});
 elements.deviceDialog.addEventListener("close", refreshVisibleReads);
 
 function mobileWorkspace() {
@@ -615,7 +670,7 @@ async function persistHistoryEntry(chatId, entry, allowed = null) {
 
 async function loadStoredHistory() {
   if (!identity?.storageKey || !identity.publicId) return;
-  if (!messagesByChat.size) { loadedHistoryKeys.clear(); receivedMedia.clear(); }
+  if (!messagesByChat.size) { loadedHistoryKeys.clear(); receivedMedia.clear(); revealedImages.clear(); }
   const records = await readHistoryRecords();
   for (const record of records) {
     if (loadedHistoryKeys.has(record.key)) continue;
@@ -777,6 +832,7 @@ class SessionExpiredError extends ClientError {}
 
 async function invalidateSession(reason = "Session expired") {
   mediaPreviews?.clear();
+  if (elements.imageViewer.open) elements.imageViewer.close();
   stopMediaTransfers();
   if (!identity) return;
   clearPresence();
@@ -1079,6 +1135,7 @@ function readableNow(node) {
       || !messageProfileReady || !conversationVisible() || document.visibilityState !== "visible"
       || typeof document.hasFocus !== "function" || !document.hasFocus()
       || elements.detailsDialog.open || elements.deviceDialog.open || elements.messageDetails.open
+      || elements.imageViewer.open
       || !visibleMessageNodes.has(node) || renderedMessages.get(node.messageEntry?.id) !== node) return false;
   const box = node.messageBubble.getBoundingClientRect();
   const list = elements.messageList.getBoundingClientRect();
@@ -1443,7 +1500,7 @@ function renderMessages(openAtLatest = false) {
       info.className = "attachment-info";
       const size = document.createElement("small");
       size.className = "attachment-size";
-      size.textContent = `${["image/jpeg", "image/png", "image/webp"].includes(entry.attachment.mime) ? "Image" : "File"} · ${fileSize(entry.attachment.size)}`;
+      size.textContent = `${IMAGE_TYPES.includes(entry.attachment.mime) ? "Image" : "File"} · ${fileSize(entry.attachment.size)}`;
       const state = document.createElement("small");
       state.className = "attachment-state";
       state.setAttribute("role", "status");
@@ -1523,7 +1580,8 @@ function scheduleVisiblePreviews() {
     }
     // Keep visible previews stable; use remaining slots for already decoded nearby images.
     const selected = new Set();
-    for (const group of [[...shownPreviews].filter(node => visible.has(node)), visible,
+    for (const group of [[requestedPreview].filter(node => visible.has(node)),
+      [...shownPreviews].filter(node => visible.has(node)), visible,
       [...shownPreviews].filter(node => near.has(node))]) {
       for (const node of group) {
         if (selected.size < SidewordMedia.MAX_ACTIVE) selected.add(node);
@@ -1547,8 +1605,9 @@ function updateAttachmentCard(node) {
   ui.download.disabled = !ready && Boolean(failure?.active);
   ui.download.title = ready ? "Download file" : "Retry media download";
   ui.download.setAttribute("aria-label", ready ? "Download attachment" : "Retry media download");
-  const image = ["image/jpeg", "image/png", "image/webp"].includes(entry.attachment.mime);
-  if (!ready && image) {
+  const image = IMAGE_TYPES.includes(entry.attachment.mime);
+  const allowed = imagePreviewAllowed(entry);
+  if (!ready && image && allowed) {
     ui.preview.className = "media-preview media-frame";
     if (!ui.placeholder) {
       ui.placeholder = document.createElement("span");
@@ -1558,13 +1617,159 @@ function updateAttachmentCard(node) {
     ui.placeholder.className = failure?.attempts >= 6 ? "media-status" : "media-status media-loading";
     ui.placeholder.textContent = failure?.attempts >= 6 ? "Image unavailable" : "Loading image…";
   }
-  if (ready && mediaPreviews && !node.previewAttached
-      && (image || ["", "application/octet-stream"].includes(entry.attachment.mime))) {
+  if (!ready || !mediaPreviews || node.previewAttached
+      || !(image || ["", "application/octet-stream"].includes(entry.attachment.mime))) return;
+  if (allowed) {
+    ui.reveal = null;
     node.previewAttached = true;
     ui.preview.replaceChildren();
     node.releaseMedia = mediaPreviews.attach(ui.preview,
-      () => SidewordProtocol.attachmentBytes(node.messageEntry.attachment), entry.attachment.mime);
+      () => SidewordProtocol.attachmentBytes(node.messageEntry.attachment), entry.attachment.mime,
+      trigger => openImageViewer(node.messageEntry, trigger));
+  } else if (image && !ui.reveal) {
+    // Hidden images are neither copied to Blob URLs nor decoded until the user asks.
+    ui.reveal = document.createElement("button");
+    ui.reveal.type = "button";
+    ui.reveal.className = "button subtle media-reveal";
+    ui.reveal.textContent = "Show image";
+    ui.reveal.addEventListener("click", event => { event?.stopPropagation?.(); revealImage(node); });
+    ui.preview.className = "media-preview";
+    ui.preview.replaceChildren(ui.reveal);
   }
+}
+
+function readImagePreviewMode() {
+  try { return window.localStorage.getItem(IMAGE_PREVIEW_KEY) === "reveal" ? "reveal" : "auto"; }
+  catch { return "auto"; } // Unavailable storage keeps the default.
+}
+
+function imagePreviewAllowed(entry) {
+  return entry.kind === "mine" || imagePreviewMode === "auto"
+    || (IMAGE_TYPES.includes(entry.attachment.mime) && revealedImages.has(entry.id));
+}
+
+function applyImagePreviewMode(mode, save = false) {
+  imagePreviewMode = mode === "reveal" ? "reveal" : "auto";
+  elements.imagePreviewReveal.checked = imagePreviewMode === "reveal";
+  elements.imagePreviewAuto.checked = imagePreviewMode === "auto";
+  if (save) {
+    try { window.localStorage.setItem(IMAGE_PREVIEW_KEY, imagePreviewMode); }
+    catch { /* The visible choice still applies for this page. */ }
+  }
+  for (const node of renderedMessages.values()) {
+    if (!node.attachmentUi) continue;
+    if (node.previewAttached && !imagePreviewAllowed(node.messageEntry)) hideImagePreview(node);
+    updateAttachmentCard(node);
+  }
+  if (renderedMessages.size) scheduleVisiblePreviews();
+}
+
+function hideImagePreview(node) {
+  node.releaseMedia?.();
+  shownPreviews.delete(node);
+  // The media manager owns one control per host, so hidden cards get a fresh host.
+  const preview = document.createElement("div");
+  preview.className = "media-preview";
+  node.messageBubble.insertBefore(preview, node.attachmentUi.preview);
+  node.attachmentUi.preview.remove();
+  node.attachmentUi.preview = preview;
+  node.attachmentUi.reveal = null;
+  node.previewAttached = false;
+  node.releaseMedia = null;
+}
+
+function revealImage(node) {
+  revealedImages.add(node.messageEntry.id);
+  requestedPreview = node;
+  const host = node.attachmentUi.preview;
+  updateAttachmentCard(node);
+  // Hold focus on the frame; the decoded image button takes it over.
+  host.tabIndex = -1;
+  host.focus({ preventScroll: true });
+  scheduleVisiblePreviews();
+}
+
+function releaseViewerImage() {
+  if (imageViewer.image) {
+    imageViewer.image.removeAttribute("src");
+    imageViewer.image.remove();
+    imageViewer.image = null;
+  }
+  if (imageViewer.url) { URL.revokeObjectURL(imageViewer.url); imageViewer.url = null; }
+  imageViewer.width = imageViewer.height = 0;
+}
+
+async function openImageViewer(entry, trigger) {
+  const dialog = elements.imageViewer;
+  const token = ++imageViewer.token;
+  releaseViewerImage();
+  Object.assign(imageViewer, { entry, chatId: selectedChatId, trigger, zoom: 1 });
+  elements.imageViewerError.textContent = "";
+  elements.imageViewerStatus.className = "media-status media-loading";
+  elements.imageViewerStatus.textContent = "Loading image…";
+  layoutImageViewer();
+  if (!dialog.open) dialog.showModal();
+  document.querySelector("#close-image-viewer").focus({ preventScroll: true });
+  refreshVisibleReads();
+  try {
+    // The viewer owns a separate validated copy, so inline cleanup cannot break it.
+    const prepared = SidewordMedia.previewBlob(SidewordProtocol.attachmentBytes(entry.attachment), entry.attachment.mime);
+    const image = document.createElement("img");
+    if (!prepared || typeof image.decode !== "function") throw new ClientError("Unsupported image");
+    image.alt = "Image attachment";
+    image.className = "viewer-image";
+    image.decoding = "async";
+    image.draggable = false;
+    imageViewer.image = image;
+    imageViewer.url = URL.createObjectURL(prepared.blob);
+    image.src = imageViewer.url;
+    await image.decode();
+    if (token !== imageViewer.token) return;
+    if (!SidewordMedia.decodedMatches(image, prepared.info)) throw new ClientError("Invalid image");
+    imageViewer.width = image.naturalWidth;
+    imageViewer.height = image.naturalHeight;
+    elements.imageViewerStatus.className = "media-status";
+    elements.imageViewerStatus.textContent = "";
+    elements.imageStage.append(image);
+    layoutImageViewer();
+  } catch {
+    if (token !== imageViewer.token) return;
+    releaseViewerImage();
+    elements.imageViewerStatus.className = "media-status";
+    elements.imageViewerStatus.textContent = "This image cannot be displayed. Download the file instead.";
+  }
+}
+
+function setViewerZoom(zoom) {
+  const stage = elements.imageStage;
+  // Keep the visible center stable while zooming.
+  const centerX = stage.scrollWidth ? (stage.scrollLeft + stage.clientWidth / 2) / stage.scrollWidth : .5;
+  const centerY = stage.scrollHeight ? (stage.scrollTop + stage.clientHeight / 2) / stage.scrollHeight : .5;
+  imageViewer.zoom = Math.min(VIEWER_ZOOM_LEVELS.at(-1), Math.max(1, zoom));
+  layoutImageViewer();
+  if (stage.scrollWidth) stage.scrollLeft = centerX * stage.scrollWidth - stage.clientWidth / 2;
+  if (stage.scrollHeight) stage.scrollTop = centerY * stage.scrollHeight - stage.clientHeight / 2;
+}
+
+function stepViewerZoom(direction) {
+  const levels = direction > 0 ? VIEWER_ZOOM_LEVELS : [...VIEWER_ZOOM_LEVELS].reverse();
+  const next = levels.find(level => direction > 0 ? level > imageViewer.zoom : level < imageViewer.zoom);
+  if (next !== undefined) setViewerZoom(next);
+}
+
+function layoutImageViewer() {
+  const zoom = imageViewer.zoom, loaded = Boolean(imageViewer.image && imageViewer.width);
+  elements.imageZoomFit.textContent = zoom === 1 ? "Fit" : `${Math.round(zoom * 100)}%`;
+  elements.imageZoomFit.setAttribute("aria-label", zoom === 1 ? "Fitted to screen" : `Zoom ${Math.round(zoom * 100)}%, fit to screen`);
+  elements.imageZoomIn.disabled = !loaded || zoom >= VIEWER_ZOOM_LEVELS.at(-1);
+  elements.imageZoomOut.disabled = !loaded || zoom <= 1;
+  elements.imageZoomFit.disabled = !loaded || zoom === 1;
+  if (!loaded) return;
+  const stage = elements.imageStage, width = imageViewer.width, height = imageViewer.height;
+  // Fit never upscales; zoom multiplies the fitted size and the stage scrolls.
+  const fit = Math.min(1, (stage.clientWidth || width) / width, (stage.clientHeight || height) / height);
+  imageViewer.image.style.width = `${Math.max(1, Math.round(width * fit * zoom))}px`;
+  imageViewer.image.style.height = `${Math.max(1, Math.round(height * fit * zoom))}px`;
 }
 
 function chatName(chat) {
@@ -1616,6 +1821,8 @@ function selectChat(chatId, openAtLatest = false) {
   if (selectedChatId !== chatId && !sendingMessage) clearAttachment();
   selectedChatId = chatId;
   if (openMessageDetails && openMessageDetails.chatId !== chatId) elements.messageDetails.close();
+  if (elements.imageViewer.open && imageViewer.chatId !== chatId) elements.imageViewer.close();
+  if (changedChat) requestedPreview = null;
   const chat = chats.find((candidate) => candidate.id === chatId);
   elements.conversationKind.textContent = chat?.closed_at
     ? "Closed · Saved history" : chat?.chat_type || "Conversation";
@@ -1634,12 +1841,13 @@ function selectChat(chatId, openAtLatest = false) {
   elements.waitingNotice.hidden = !waitingForPeer;
   elements.messageInput.disabled = !canSend;
   elements.messageInput.placeholder = waitingForPeer ? "Waiting for another participant…" : "Write a message";
-  elements.sendButton.disabled = !canSend || sendingMessage;
+  elements.sendButton.disabled = !canSend || sendingMessage || composerPreview.optimizing;
   elements.attachmentButton.disabled = !canSend || sendingMessage;
   elements.attachmentInput.disabled = !canSend || sendingMessage;
   elements.messageInput.hidden = false;
   elements.messageForm.classList.toggle("has-attachment", Boolean(selectedFile));
-  elements.sendButton.textContent = sendingMessage ? "Sending…" : selectedFile ? "Send file" : "Send";
+  elements.sendButton.textContent = sendingMessage ? "Sending…" : composerPreview.optimizing ? "Reducing…"
+    : selectedFile ? "Send file" : "Send";
   elements.attachmentButton.setAttribute("aria-label", selectedFile ? "Replace attached file" : "Attach a file");
   document.querySelector("#composer-help").textContent = chat?.closed_at
     ? "Conversation closed. Saved history is kept; messaging is paused."
@@ -1663,6 +1871,7 @@ function updateIdentityUi() {
   elements.setupPanel.hidden = active;
   elements.clientPanel.hidden = !active;
   if (!active && elements.detailsDialog.open) elements.detailsDialog.close();
+  if (!active && elements.imageViewer.open) elements.imageViewer.close();
   document.querySelector("#reconnect-session").hidden = invitePending || active || !identity?.suspendedToken;
   updateConnectionState(false);
   if (active) renderMessages();
@@ -2289,6 +2498,7 @@ elements.activationForm.addEventListener("submit", async (event) => {
       // reconnect; a new invite must never perform a destructive device reset.
       messagesByChat.clear();
       receivedMedia.clear();
+      revealedImages.clear();
       mediaUploadStates.clear();
       seenMessageIds.clear();
       seenReceiptIds.clear();
@@ -2564,7 +2774,8 @@ function downloadIcon() {
 }
 
 function fileSize(size) {
-  return size === 1048576 ? "1 MiB" : size >= 1024 ? `${(size / 1024).toFixed(1)} KiB` : `${size} B`;
+  return size === 1048576 ? "1 MiB" : size > 1048576 ? `${(size / 1048576).toFixed(1)} MiB`
+    : size >= 1024 ? `${(size / 1024).toFixed(1)} KiB` : `${size} B`;
 }
 
 function composerError(message = "") {
@@ -2574,26 +2785,129 @@ function composerError(message = "") {
 
 function clearAttachment() {
   selectedFile = null;
+  composerPreview.token++;
+  composerPreview.optimizing = false;
+  releaseComposerImage();
+  elements.attachmentTile.classList.toggle("media-loading", false);
   elements.attachmentInput.value = "";
   elements.attachmentPreview.hidden = true;
   elements.attachmentLabel.textContent = "";
   elements.attachmentSize.textContent = "";
 }
 
+function releaseComposerImage() {
+  elements.attachmentTile.classList.toggle("has-thumbnail", false);
+  if (composerPreview.image) {
+    composerPreview.image.removeAttribute("src");
+    composerPreview.image.remove();
+    composerPreview.image = null;
+  }
+  if (composerPreview.url) { URL.revokeObjectURL(composerPreview.url); composerPreview.url = null; }
+}
+
+// Largest file that fits the per-recipient encrypted request budget for this chat.
+function sendableFileBytes(chatId) {
+  const chat = chats.find(candidate => candidate.id === chatId);
+  const recipients = chat?.participants.filter(item => item.public_id !== identity?.publicId).length || 0;
+  let low = 0, high = SidewordProtocol.MAX_FILE_BYTES;
+  if (!recipients) return high;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (SidewordProtocol.attachmentSendBytes(middle, recipients) <= SidewordProtocol.MAX_SEND_BYTES) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+
+// Local review only: reads after size and peer-trust checks, never uploads. Oversized
+// images, such as browser-copied PNGs, are re-encoded as smaller JPEGs before Send.
+async function prepareSelectedImage(file, chatId) {
+  const token = composerPreview.token;
+  let staged = file;
+  const current = () => token === composerPreview.token && selectedFile === staged && selectedChatId === chatId;
+  if (!globalThis.SidewordMedia || !IMAGE_TYPES.includes(file.type.toLowerCase())) return;
+  const optimize = composerPreview.optimizing;
+  let shown = false, failure = null;
+  elements.attachmentTile.classList.toggle("media-loading", true);
+  if (!optimize) elements.attachmentSize.textContent = `${fileSize(file.size)} · Preparing image preview…`;
+  try {
+    const chat = chats.find(candidate => candidate.id === chatId);
+    const recipients = chat?.participants.filter(item => item.public_id !== identity.publicId) || [];
+    if (!recipients.length) throw new ClientError("This conversation has no recipients.");
+    for (const recipient of recipients) await assertTrustedPeer(recipient);
+    if (!current()) return;
+    let bytes = new Uint8Array(await file.arrayBuffer());
+    if (!current()) return;
+    if (optimize) {
+      bytes = await SidewordMedia.reduceImage(bytes, file.type, sendableFileBytes(chatId), current);
+      if (!current()) return;
+      if (!bytes) throw new ClientError("This image could not be reduced below the send limit. Choose a smaller image.");
+      const name = `${file.name.replace(/\.[^.]*$/, "").slice(0, 200) || "image"}.jpg`;
+      staged = new File([bytes], name, { type: "image/jpeg" });
+      selectedFile = staged;
+      composerPreview.optimizing = false;
+      elements.attachmentLabel.textContent = SidewordProtocol.safeDownloadName(name);
+      elements.attachmentLabel.title = elements.attachmentLabel.textContent;
+      selectChat(chatId);
+    }
+    const prepared = SidewordMedia.previewBlob(bytes, staged.type);
+    const image = document.createElement("img");
+    if (!prepared || typeof image.decode !== "function") return;
+    image.alt = "";
+    image.className = "attachment-thumb";
+    image.decoding = "async";
+    image.draggable = false;
+    composerPreview.image = image;
+    composerPreview.url = URL.createObjectURL(prepared.blob);
+    image.src = composerPreview.url;
+    await image.decode();
+    if (!current() || !SidewordMedia.decodedMatches(image, prepared.info)) return;
+    elements.attachmentTile.append(image);
+    elements.attachmentTile.classList.toggle("has-thumbnail", true);
+    shown = true;
+  } catch (error) { failure = error; }
+  finally {
+    if (current()) finishSelectedImage(file, staged, shown, failure);
+  }
+}
+
+function finishSelectedImage(original, staged, shown, failure) {
+  elements.attachmentTile.classList.toggle("media-loading", false);
+  if (composerPreview.optimizing) {
+    // An oversized image cannot be sent unchanged, so remove it and explain why.
+    clearAttachment();
+    composerError(failure instanceof ClientError ? failure.message
+      : "This image could not be reduced below the send limit. Choose a smaller image.");
+    selectChat(selectedChatId);
+    return;
+  }
+  if (!shown) releaseComposerImage();
+  const note = staged !== original ? `Optimized from ${fileSize(original.size)}`
+    : shown ? "Image attachment" : "Image preview unavailable";
+  elements.attachmentSize.textContent = `${fileSize(staged.size)} · ${note}`;
+}
+
 function selectAttachment(file) {
   clearAttachment();
   composerError();
   if (!file) return;
-  if (file.size > SidewordProtocol.MAX_FILE_BYTES) {
+  const image = IMAGE_TYPES.includes(file.type.toLowerCase());
+  const optimize = Boolean(image && globalThis.SidewordMedia && file.size > sendableFileBytes(selectedChatId));
+  if (optimize && file.size > SidewordMedia.MAX_SOURCE_BYTES) {
+    throw new ClientError("Images must be 20 MiB or smaller to be reduced for sending.");
+  }
+  if (!optimize && file.size > SidewordProtocol.MAX_FILE_BYTES) {
     throw new ClientError("Files must be 1 MiB (1,048,576 bytes) or smaller.");
   }
   if (!file.name || file.name.length > 255 || file.type.length > 127) {
     throw new ClientError("The filename or declared file type is too long.");
   }
   selectedFile = file;
+  composerPreview.optimizing = optimize;
   elements.attachmentLabel.textContent = SidewordProtocol.safeDownloadName(file.name);
   elements.attachmentLabel.title = elements.attachmentLabel.textContent;
-  elements.attachmentSize.textContent = `${fileSize(file.size)} · File attachment`;
+  elements.attachmentSize.textContent = optimize ? `${fileSize(file.size)} · Reducing image for sending…`
+    : `${fileSize(file.size)} · ${image ? "Image" : "File"} attachment`;
   elements.attachmentPreview.hidden = false;
   // Keep the text composer available for an optional message above the media.
 }
@@ -2612,6 +2926,7 @@ function stageAttachmentFiles(files) {
   try { selectAttachment(files[0]); }
   catch (error) { composerError(errorMessage(error)); }
   selectChat(selectedChatId);
+  if (selectedFile) void prepareSelectedImage(selectedFile, selectedChatId);
   if (selectedFile && !elements.sendButton.disabled) elements.sendButton.focus();
 }
 
@@ -2693,7 +3008,7 @@ elements.messageForm.addEventListener("submit", async (event) => {
   const text = elements.messageInput.value.trim();
   const chat = chats.find((candidate) => candidate.id === selectedChatId);
   const file = selectedFile;
-  if (sendingMessage || (!text && !file) || !chat || chat.closed_at) return;
+  if (sendingMessage || composerPreview.optimizing || (!text && !file) || !chat || chat.closed_at) return;
   sendingMessage = true;
   elements.sendButton.disabled = true;
   elements.attachmentButton.disabled = true;
@@ -2845,6 +3160,7 @@ window.addEventListener("online", () => {
 window.addEventListener("offline", disconnectSocket);
 window.addEventListener("pagehide", () => {
   mediaPreviews?.clear();
+  if (elements.imageViewer.open) elements.imageViewer.close();
   stopMediaTransfers();
   for (const url of downloadUrls.keys()) releaseDownload(url);
   pageActive = false;
@@ -2878,6 +3194,7 @@ window.addEventListener("blur", () => {
 });
 window.addEventListener("resize", () => {
   scheduleVisiblePreviews();
+  if (elements.imageViewer.open) layoutImageViewer();
   refreshVisibleReads();
   positionMessageDetails();
 });
@@ -2891,4 +3208,5 @@ function showStartupError(error) {
   showToast(errorMessage(error), true);
 }
 
+applyImagePreviewMode(imagePreviewMode);
 start().catch(showStartupError);

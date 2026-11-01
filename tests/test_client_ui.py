@@ -260,6 +260,19 @@ def test_editorial_message_layout_uses_compact_bubbles_and_integrated_svg_indica
     assert "min-height: 20px; margin-top: .1rem" not in css
     assert "background: var(--mine); padding-bottom:" not in css
     assert ".message.continuation { margin-top: .25rem; }" in css
+
+
+def test_attachment_cards_use_the_same_text_and_media_spacing_for_both_senders():
+    css = (ROOT / "app/static/client.css").read_text()
+    # The sender-only status spacer must be outranked inside cards (specificity 0,4,1 > 0,3,1).
+    assert ".message.mine .attachment-card > .message-content::after { display: none; }" in css
+    assert "align-items: center; gap: 0 .4rem;" in css
+    assert (".attachment-card > .message-content { grid-column: 1 / -1; grid-row: 1; "
+            "margin-bottom: .4rem; }") in css
+    assert (".attachment-card .media-preview { grid-column: 1 / -1; grid-row: 3; "
+            "margin-top: .4rem;") in css
+    assert ".media-preview:empty { display: none; }" in css
+    assert css.index(".attachment-card .media-preview {") < css.index(".media-preview:empty {")
     assert ".message-status svg { display: block; width: 20px; height: 15px" in css
     assert ('svg[data-icon="check"], .message-status svg[data-icon="double-check"] '
             '{ width: 14px; height: 10.5px; }') in css

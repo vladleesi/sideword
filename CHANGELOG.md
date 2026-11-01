@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.18.0 — 2026-10-31
+
+- Add a locally stored device setting for incoming images: show supported JPEG/PNG/WebP images automatically (default) or hide them behind Show image. Hidden images are not copied to Blob URLs or decoded, generic-type files stay downloads, and this device's own images always preview.
+- Open decoded previews in an accessible full-screen viewer with fit, zoom buttons, +/−/0 keys, double-click/tap zoom, scrollable panning, Escape and a separate generic download; the viewer uses its own validated Blob URL, released on close, chat switch, session loss and page hide, and suppresses read confirmations underneath it.
+- Reduce oversized JPEG/PNG/WebP selections up to 20 MiB, including browser-copied chat images that paste as large PNGs, to validated metadata-free JPEGs that fit the chat's send limit; Send waits for local reduction and failures show inline errors.
+- Show a local thumbnail for selected, pasted or dropped images after size and peer-key checks; stale reads and decodes are discarded on cancel, replacement or chat switching, and nothing uploads until Send.
+- Show a visible unavailable state for declared images that fail validation or decoding instead of collapsing the frame.
+- Use identical text, file-row and image spacing in sent and received attachment cards; hidden rows no longer add gaps.
+
 ## 0.17.0 — 2026-10-29
 
 - Deliver encrypted text and attachment references without waiting for media transfer; use a separate bounded media queue with independent durable ACKs, immutable retries and the original expiry deadline.
