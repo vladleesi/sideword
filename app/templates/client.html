@@ -12,11 +12,11 @@
   <link rel="preload" href="/static/fonts/IBMPlexSans-SemiBold.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
   <script src="/static/appearance.js?v=2"></script>
-  <link rel="stylesheet" href="/static/client.css?v=43">
+  <link rel="stylesheet" href="/static/client.css?v=44">
   <script src="/static/client-protocol.js?v=7" defer></script>
   <script src="/static/client-media.js?v=9" defer></script>
   <script src="/static/client-links.js?v=2" defer></script>
-  <script src="/static/client.js?v=60" defer></script>
+  <script src="/static/client.js?v=62" defer></script>
 </head>
 <body class="messenger">
   <a class="skip-link" href="#workspace">Skip to workspace</a>
@@ -151,8 +151,7 @@
     </div>
     <div class="dialog-content">
       <p id="details-conversation-title" class="muted"></p>
-      <p id="key-guidance">Compare each full fingerprint with its owner over a separate trusted channel. First-use key pinning is not identity verification. Changed keys block messaging.</p>
-      <p class="muted">Display names are labels, not verified identities. Use public IDs to distinguish participants with the same name.</p>
+      <p id="key-guidance" class="muted">To verify someone, compare their fingerprint with them through another trusted channel. First-use key pinning is not identity verification.</p>
       <div id="participant-keys" class="participant-list"></div>
       <p id="details-copy-status" role="status" hidden></p>
       <div id="details-status" class="toast" role="status" hidden></div>
@@ -168,12 +167,7 @@
     <div class="dialog-content">
       <p><strong id="message-details-status"></strong> · <time id="message-details-time"></time></p>
       <div id="message-details-recipients"></div>
-      <p id="message-details-note" class="muted"></p>
-      <details>
-        <summary>Technical details</summary>
-        <dl id="message-details-technical" class="technical-details"></dl>
-        <p id="message-details-copy-status" role="status" hidden></p>
-      </details>
+      <p id="message-details-note" class="muted" hidden></p>
     </div>
   </dialog>
 
@@ -201,14 +195,13 @@
     </div>
     <div class="dialog-content">
       <section aria-labelledby="device-heading">
-        <h3 id="device-heading">Device and session</h3>
-        <p id="identity-label" class="muted">No local identity</p>
-        <dl class="technical-details">
-          <dt>Device public ID</dt>
-          <dd><code id="device-public-id" tabindex="0">No local identity</code></dd>
-        </dl>
-        <p id="session-countdown" class="technical-value" hidden></p>
-        <p>Local history is encrypted on this device. Reset device permanently removes it and the private key.</p>
+        <h3 id="device-heading">This device</h3>
+        <p id="identity-label" class="muted">Not signed in</p>
+        <details class="device-id">
+          <summary>Device ID</summary>
+          <code id="device-public-id" tabindex="0">Not signed in</code>
+        </details>
+        <p class="muted">Chat history is stored encrypted on this device. Resetting permanently deletes it and this device's keys.</p>
         <button id="reset-button" class="button danger" type="button">Reset device</button>
       </section>
       <fieldset class="appearance-controls">
@@ -221,21 +214,19 @@
         <legend>Incoming images</legend>
         <label><input id="image-previews-reveal" type="radio" name="image-previews" value="reveal">Click to reveal</label>
         <label><input id="image-previews-auto" type="radio" name="image-previews" value="auto" checked>Show automatically</label>
-        <p id="image-previews-help" class="muted">JPEG, PNG and WebP previews are decoded only on this device. Other files stay downloads.</p>
+        <p id="image-previews-help" class="muted">Images are shown only on this device; other files stay downloads.</p>
       </fieldset>
       <fieldset class="appearance-controls" aria-describedby="link-previews-help link-previews-unavailable">
         <legend>Link previews</legend>
-        <label><input id="link-previews-off" type="radio" name="link-previews" value="off" checked>Off</label>
-        <label><input id="link-previews-on" type="radio" name="link-previews" value="on">On</label>
-        <p id="link-previews-help" class="muted">When on, this server's preview service loads a title and image for HTTPS links you send, starting while you type; the preview is sent encrypted with your message, or shortly after it if still loading. Received previews come from their sender and are never fetched. Messages stay encrypted; previews are cached encrypted on this device for up to 7 days and deleted when you turn this off.</p>
+        <label><input id="link-previews-off" type="radio" name="link-previews" value="off">Off</label>
+        <label><input id="link-previews-on" type="radio" name="link-previews" value="on" checked>On</label>
+        <p id="link-previews-help" class="muted">On by default. Links you send get a preview from this server, starting while you type; it travels encrypted with your message. Received previews are never fetched.</p>
         <p id="link-previews-unavailable" class="muted">This server cannot create previews; received previews still show.</p>
       </fieldset>
       <section aria-labelledby="security-heading">
-        <h3 id="security-heading">Security information</h3>
-        <p><strong>Testing only.</strong> Use HTTPS anywhere except localhost.</p>
-        <p>Keys stay in this browser and messages are encrypted before upload. The private key never leaves this browser. Local history is encrypted on this device.</p>
-        <p>Compare each full fingerprint with its owner over a separate trusted channel. First-use key pinning is not identity verification. Changed keys block messaging.</p>
-        <p class="muted">A local pin detects later key changes, not an initial key substitution. Encryption cannot protect against malicious code delivered by this site's server or a compromised device.</p>
+        <h3 id="security-heading">Security</h3>
+        <p>Messages are end-to-end encrypted. Your keys and chat history stay on this device.</p>
+        <p class="muted">To verify a contact, compare fingerprints in conversation details through another trusted channel. If a contact's key changes, messaging with them is blocked.</p>
       </section>
       <div id="device-status" class="toast" role="status" hidden></div>
       <div id="device-error" class="toast error" role="alert" hidden></div>

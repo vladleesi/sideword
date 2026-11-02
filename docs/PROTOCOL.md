@@ -168,9 +168,9 @@ this is a heuristic, not a full confusable check.
 
 Previews are made by the sender and sent inside the encrypted `text` payload, so recipients
 never fetch anything and link owners cannot see when a message is opened. With the device
-setting on and the server offering previews, the draft's first HTTPS link is sent to the
-[link-preview API](API.md#link-previews) once it looks complete (followed by text, pasted,
-or after a pause); removing it cancels the request and drops the result. Send never waits: a
+setting on (the default) and the server offering previews, the draft's first HTTPS link is
+sent to the [link-preview API](API.md#link-previews) once it looks complete (followed by
+text, pasted, or after a pause); removing it cancels the request and drops the result. Send never waits: a
 ready preview goes inside the message; otherwise loading continues (or starts) and the preview
 follows to the same recipients in an encrypted `link-preview` message, so both sides see the
 card appear later. The image is included only when every recipient copy stays within half the

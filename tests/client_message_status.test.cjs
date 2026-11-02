@@ -117,8 +117,11 @@ test('original recipient sets survive roster changes, partial details and duplic
     showMessageDetails(7,message,elements.messageList.firstChild);`);
   assert.equal(state(app).status, 'read');
   const groups = app.nodes.get('#message-details-recipients').children;
-  assert.match(groups[0].textContent, /Alex \(peer-a\)/);
-  assert.match(groups[2].textContent, /Alex \(peer-b\)/);
+  const section = heading => groups.find(group => group.children[0].textContent === heading);
+  assert.match(section('Read by').textContent, /Alex \(peer-a\)/);
+  assert.match(section('Pending').textContent, /Alex \(peer-b\)/);
+  // Empty lists other than "Read by" are omitted, so they never contradict each other.
+  assert.equal(section('Delivered to'), undefined);
   assert.doesNotMatch(groups.map(row => row.textContent).join(''), /New/);
   app.run('chats[0].participants = []; refreshMessageDetails();');
   assert.match(app.nodes.get('#message-details-recipients').children[0].textContent, /peer-a/);
@@ -202,10 +205,6 @@ for (const mobile of [false,true]) {
     assert.equal(prevented,true);
     assert.equal(app.nodes.get('#message-details').open,true);
     assert.equal(app.document.activeElement,app.nodes.get('#close-message-details'));
-    const technical = app.nodes.get('#message-details-technical');
-    assert.match(technical.textContent,/stable/);
-    await technical.children[1].children[1].emit('click');
-    assert.deepEqual(app.copied,['stable']);
     app.nodes.get('#close-message-details').emit('click');
     assert.equal(app.document.activeElement,bubble);
     app.selection.selectedText='selected';
@@ -338,17 +337,6 @@ test('a receipt persistence failure cannot delay acknowledgements for durable in
 });
 
 
-test('message details retain selectable full IDs when clipboard access is blocked', async () => {
-  const app=await outgoing({clipboardBlocked:true});
-  app.run('showMessageDetails(7,message,elements.messageList.firstChild)');
-  const detail=app.nodes.get('#message-details-technical').children[1];
-  await detail.children[1].emit('click');
-  assert.equal(app.selection.value,'stable');
-  assert.equal(app.document.activeElement,detail.children[0]);
-  assert.match(app.nodes.get('#message-details-copy-status').textContent,/copy it manually/);
-});
-
-
 test('lost local ACK-marker persistence retries the exact delivery without duplicate messages', async () => {
   const app=client();
   await app.run(`decryptMessage=async message=>SidewordProtocol.encodePayload(SidewordProtocol.textPayload(message.ciphertext));
@@ -416,7 +404,10 @@ test('one confirmed reader shows orange double checks while other original recip
   assert.match(indicator.className,/status-read/);
   assert.equal(indicator.attributes.get('aria-label'),'Read by 1 of 3 recipients. Open message details');
   assert.equal(app.nodes.get('#message-details-status').textContent,'Read by 1 of 3 recipients');
-  assert.equal(app.nodes.get('#message-details-recipients').children[2].children[1].children.length,2);
+  const pending = app.nodes.get('#message-details-recipients').children
+    .find(group => group.children[0].textContent === 'Pending');
+  assert.equal(pending.children[1].children.length,2);
+  assert.equal(app.nodes.get('#message-details-note').hidden,false);
 });
 
 
@@ -555,7 +546,7 @@ test('message details close on one outside click or native Escape while preservi
   const dialog=app.nodes.get('#message-details');
   row.emit('click',{target:row});
   dialog.emit('click',{target:dialog,clientX:50,clientY:50}); assert.equal(dialog.open,true);
-  dialog.emit('click',{target:app.nodes.get('#message-details-technical'),clientX:200,clientY:200});
+  dialog.emit('click',{target:app.nodes.get('#message-details-recipients'),clientX:200,clientY:200});
   assert.equal(dialog.open,true);
   dialog.emit('click',{target:dialog,clientX:150,clientY:50}); assert.equal(dialog.open,false);
   assert.equal(app.document.activeElement,row);
@@ -608,4 +599,18 @@ test('status recovery persists terminal delivery state before rendering and neve
   assert.equal(state(app).status, 'expired');
   assert.equal(state(app).readCount, 0);
   assert.equal(app.run('saved.filter(e=>e.kind==="delivery_state").length'), 1);
+});
+
+test('message details never contradict themselves once everyone has read the message', async () => {
+  const app=await outgoing();
+  await app.run(`(async()=>{
+    message.recipients=['peer-a'];
+    await storeAcceptance(7,'stable',{recipients:['peer-a'],deliveries:{'peer-a':'a'.repeat(32)}});
+    await processReceipts([receipt]);
+    showMessageDetails(7,message,elements.messageList.firstChild);
+  })()`);
+  const headings=app.nodes.get('#message-details-recipients').children.map(group => group.children[0].textContent);
+  assert.deepEqual(headings,['Read by']);
+  assert.doesNotMatch(app.nodes.get('#message-details-recipients').textContent,/None confirmed|No one yet/);
+  assert.equal(app.nodes.get('#message-details-note').hidden,true);
 });

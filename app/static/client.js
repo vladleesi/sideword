@@ -12,7 +12,7 @@ const POLL_INTERVAL_MS = 4000;
 const REQUEST_TIMEOUT_MS = 15000;
 // Local display preference only; it never changes delivery, receipts or stored history.
 const IMAGE_PREVIEW_KEY = "sideword-client-image-previews";
-// Link previews are off until chosen on this device; when on, rendered links load previews.
+// Link previews are on by default; an explicit "off" on this device is kept.
 const LINK_PREVIEW_KEY = "sideword-client-link-previews";
 // Memory only, for the sender's draft; sent previews live in the message's encrypted history.
 const LINK_PREVIEW_CACHE_SIZE = 20;
@@ -430,12 +430,9 @@ function renderParticipantDetails(chat) {
       const summary = document.createElement("summary");
       const name = document.createElement("span");
       name.className = "participant-name";
-      const publicId = document.createElement("span");
-      publicId.className = "participant-identity";
-      publicId.textContent = peer.public_id;
       const state = document.createElement("span");
       const presence = document.createElement("span");
-      summary.append(name, presence, publicId, state);
+      summary.append(name, presence, state);
       const values = document.createElement("dl");
       values.className = "technical-details";
       const feedback = document.querySelector("#details-copy-status");
@@ -448,9 +445,9 @@ function renderParticipantDetails(chat) {
     }
     const own = peer.public_id === identity?.publicId;
     item.name.textContent = `${peer.display_name?.trim() || "Unnamed participant"}${own ? " (this device)" : ""}`;
-    item.state.textContent = peer.key_changed ? "KEY CHANGED; blocked"
-      : !peer.local_fingerprint ? "Unchecked key"
-      : own ? "This device key" : "Locally pinned · identity not verified";
+    // Only states that need attention are shown; routine pinned keys stay quiet.
+    item.state.textContent = peer.key_changed ? "Key changed · messaging blocked"
+      : !peer.local_fingerprint ? "Key not checked" : "";
     item.state.className = `key-state${peer.key_changed ? " changed" : ""}`;
     item.fingerprint.code.textContent = peer.local_fingerprint || "not checked";
     item.fingerprint.copy.disabled = !peer.local_fingerprint;
@@ -898,7 +895,7 @@ async function invalidateSession(reason = "Session expired") {
   if (identity.token) identity.suspendedToken = identity.token;
   identity.token = null;
   accessDeadline = null;
-  updateSessionCountdown();
+  checkAccessExpiry();
   await writeIdentity(identity, true);
   chats = [];
   selectedChatId = null;
@@ -1379,19 +1376,21 @@ function refreshMessageDetails() {
   const { chatId, entry } = openMessageDetails;
   const state = outgoingStatus(chatId, entry);
   document.querySelector("#message-details-status").textContent = entry.attachment
-    ? `${messageStatusLabel(state).replace(/^Read/, "Card viewed")} · File opening/download is not confirmed`
-    : messageStatusLabel(state);
+    ? messageStatusLabel(state).replace(/^Read/, "Card viewed") : messageStatusLabel(state);
   document.querySelector("#message-details-time").textContent = displayTimestamp(state.timestamp, true);
   const groups = document.querySelector("#message-details-recipients");
   groups.replaceChildren();
+  // Each recipient appears once; only "Read by" shows when empty, so lists never contradict.
+  const pending = state.states.filter(peer => !peer.delivered && !peer.failure);
   for (const [label, peers, timeField] of [
     ["Read by", state.states.filter(peer => peer.read), "readAt"],
     ["Delivered to", state.states.filter(peer => peer.delivered && !peer.read), "deliveredAt"],
-    ["Pending", state.states.filter(peer => !peer.delivered && !peer.failure), null],
+    ["Pending", pending, null],
     ...(["expired", "unavailable"].filter(failure => state.states.some(peer => peer.failure === failure))
       .map(failure => [failure === "expired" ? "Expired without confirmation" : "Unavailable without confirmation",
         state.states.filter(peer => peer.failure === failure), null])),
   ]) {
+    if (!peers.length && label !== "Read by") continue;
     const section = document.createElement("section");
     const heading = document.createElement("h3"); heading.textContent = label;
     const list = document.createElement("ul");
@@ -1405,27 +1404,14 @@ function refreshMessageDetails() {
       }
       list.append(row);
     }
-    if (!peers.length) { const empty = document.createElement("li"); empty.textContent = "None confirmed"; list.append(empty); }
+    if (!peers.length) { const empty = document.createElement("li"); empty.textContent = "No one yet"; list.append(empty); }
     section.append(heading, list); groups.append(section);
   }
   const note = document.querySelector("#message-details-note");
-  note.textContent = !state.recipientsKnown ? "The original recipient list is unavailable. Full delivery and reading cannot be confirmed."
-    : state.states.some(peer => peer.failure) ? "Some recipients have no delivery confirmation and their relay copies are no longer available. Your local copy is kept; verify with them before sending again."
-    : "Pending means delivery has not been confirmed. Confirmations may be delayed.";
-  // Keep technical controls and focus stable as receipt updates arrive.
-  const technical = document.querySelector("#message-details-technical");
-  const signature = JSON.stringify([state.messageId, state.states.map(peer => peer.publicId)]);
-  if (technical.dataset.signature !== signature) {
-    technical.dataset.signature = signature;
-    technical.replaceChildren();
-    const feedback = document.querySelector("#message-details-copy-status");
-    for (const [label, value] of [["Message ID", state.messageId],
-      ["Sender public ID", entry.senderPublicId || identity.publicId],
-      ...state.states.map(peer => ["Participant public ID", peer.publicId])]) {
-      const detail = publicDetail(label, value, feedback);
-      technical.append(detail.term, detail.description);
-    }
-  }
+  note.textContent = !state.recipientsKnown ? "The original recipient list is unavailable, so delivery cannot be fully confirmed."
+    : state.states.some(peer => peer.failure) ? "Some recipients never confirmed delivery and the server no longer holds their copy. Your local copy is kept; check with them before sending again."
+    : pending.length ? "Delivery confirmations can take a moment." : "";
+  note.hidden = !note.textContent;
   positionMessageDetails();
 }
 
@@ -1457,7 +1443,6 @@ function positionMessageDetails() {
 function showMessageDetails(chatId, entry, trigger) {
   openMessageDetails = { chatId, entry };
   messageDetailsTrigger = trigger;
-  document.querySelector("#message-details-copy-status").hidden = true;
   refreshMessageDetails();
   const dialog = elements.messageDetails;
   if (!dialog.open) dialog.showModal();
@@ -2134,8 +2119,8 @@ function scheduleLinkPreviewDrain() {
 }
 
 function readLinkPreviewMode() {
-  try { return window.localStorage.getItem(LINK_PREVIEW_KEY) === "on" ? "on" : "off"; }
-  catch { return "off"; } // Unavailable storage keeps previews off.
+  try { return window.localStorage.getItem(LINK_PREVIEW_KEY) === "off" ? "off" : "on"; }
+  catch { return "on"; } // Unavailable storage keeps the default.
 }
 
 function applyLinkPreviewMode(mode, save = false) {
@@ -2402,10 +2387,10 @@ function updateConnectionState(connected) {
   const active = Boolean(!invitePending && identity?.token && identity?.publicId);
   elements.connectionState.classList.toggle("online", active && connected);
   elements.identityLabel.textContent = active
-    ? `Device ${identity.publicId} · ${connected ? "Live" : "Polling"}`
-    : "No local identity";
+    ? (connected ? "Connected" : "Connected · updates may be delayed")
+    : "Not signed in";
   elements.connectionLabel.textContent = active ? (connected ? "Live" : "Polling") : "Offline";
-  elements.devicePublicId.textContent = identity?.publicId || "No local identity";
+  elements.devicePublicId.textContent = identity?.publicId || "Not signed in";
 }
 
 async function loadChats() {
@@ -2415,7 +2400,7 @@ async function loadChats() {
   accessDeadline = deadline
     ? performance.now() + serverTimestamp(deadline) - serverTimestamp(data.server_time)
     : null;
-  updateSessionCountdown();
+  checkAccessExpiry();
   if (data.user.public_key !== identity.publicKey) {
     throw new ClientError("The server's account encryption key differs from this device's saved key. The login and local device identity do not match. Keep this device's history.");
   }
@@ -3673,7 +3658,7 @@ async function start() {
   if (!invitePending && selectedChatId) renderMessages(true);
   if (!invitePending && identity?.token) connectSocket();
   window.setInterval(synchronize, POLL_INTERVAL_MS);
-  window.setInterval(updateSessionCountdown, 1000);
+  window.setInterval(checkAccessExpiry, 1000);
 }
 
 // The invite credential stays in the server-filled form only: remove it from the address bar
@@ -3684,24 +3669,10 @@ function scrubInviteFromUrl() {
   history.replaceState(history.state, "", window.location.pathname);
 }
 
-function formatTimeRemaining(milliseconds) {
-  const total = Math.max(0, Math.ceil(milliseconds / 1000));
-  const days = Math.floor(total / 86400);
-  const hours = Math.floor(total / 3600) % 24;
-  const minutes = Math.floor(total / 60) % 60;
-  const seconds = total % 60;
-  const clock = [hours, minutes, seconds].map(value => String(value).padStart(2, "0")).join(":");
-  return `${days ? `${days}d ` : ""}${clock}`;
-}
-
-function updateSessionCountdown() {
-  const element = document.querySelector("#session-countdown");
-  if (!element) return;
-  element.hidden = invitePending || !identity?.token || accessDeadline === null;
-  if (element.hidden) return;
-  const remaining = accessDeadline - performance.now();
-  element.textContent = `Session expires in ${formatTimeRemaining(remaining)}`;
-  if (remaining <= 0) {
+// Access tokens renew automatically; only an actually expired session is surfaced.
+function checkAccessExpiry() {
+  if (invitePending || !identity?.token || accessDeadline === null) return;
+  if (accessDeadline - performance.now() <= 0) {
     accessDeadline = null;
     void invalidateSession("Session expired").catch(error => showToast(errorMessage(error), true));
   }

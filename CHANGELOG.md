@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.22.0 — 2026-11-01
+
+### Web
+
+- Turn link previews on by default on new devices; a device where previews were turned off keeps that choice, and the setting's help text says it is on by default.
+- Simplify device settings, conversation details and message details: show connection state instead of the device ID (now collapsible), drop the session countdown and message technical IDs, show key states only when they need attention, and shorten the security text.
+- Show "Delivered to" and "Pending" only when they list someone, so a fully read message no longer shows "Delivered to: None confirmed"; notes appear only when they apply.
+- Remove a stale link-preview help sentence about an on-device cache that no longer exists.
+
 ## 0.21.0 — 2026-11-01
 
 ### Backend

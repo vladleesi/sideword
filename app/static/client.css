@@ -198,13 +198,16 @@ textarea:disabled { color: var(--muted); }
 .participant-presence::before { content: ""; width: .4rem; height: .4rem; border: 1px solid var(--muted); border-radius: 50%; }
 .participant-presence.online::before { background: var(--success); border-color: var(--success); }
 .participant-presence.offline::before { background: var(--muted); opacity: .5; }
-.participant-identity, .key-state { display: block; padding-left: 1.1rem; margin-top: .2rem; color: var(--muted); font-size: .75rem; overflow-wrap: anywhere; }
-.participant-identity { font-family: var(--mono); }
-.key-state.changed { color: var(--danger); }
+.key-state { display: block; padding-left: 1.1rem; margin-top: .2rem; color: var(--muted); font-size: .75rem; overflow-wrap: anywhere; }
+.key-state:empty { display: none; }
+.key-state.changed { color: var(--danger); font-weight: 500; }
+.device-id { margin: .5rem 0 1rem; }
+.device-id summary { color: var(--muted); font-size: .8125rem; cursor: pointer; }
+.device-id code { display: block; margin-top: .4rem; font-family: var(--mono); font-size: .75rem; overflow-wrap: anywhere; user-select: text; }
 .technical-details { margin: .5rem 0 1rem; }
 .technical-details dt { font-size: .75rem; color: var(--muted); margin-top: .75rem; }
 .technical-details dd { margin: .25rem 0 0; }
-.technical-details code, .technical-value { display: block; font-family: var(--mono); font-size: .75rem; overflow-wrap: anywhere; white-space: pre-wrap; user-select: text; }
+.technical-details code { display: block; font-family: var(--mono); font-size: .75rem; overflow-wrap: anywhere; white-space: pre-wrap; user-select: text; }
 .technical-details .button { margin-top: .5rem; }
 .appearance-controls { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.25rem 0; padding: .5rem 0 1rem; border: 0; border-bottom: 1px solid var(--border); }
 .appearance-controls legend { padding: 0; margin-bottom: .5rem; font-size: .875rem; font-weight: 600; }

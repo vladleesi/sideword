@@ -358,9 +358,10 @@ test('participant details expose full values, duplicate identities, unchecked an
   assert.equal(rows[0].tagName, 'details');
   assert.equal(rows[0].children[0].children[0].textContent, 'Alex (this device)');
   assert.equal(rows[1].children[0].children[0].textContent, 'Alex');
-  assert.equal(rows[1].children[0].children[2].textContent, 'peer-a');
-  assert.equal(rows[1].children[0].children[3].textContent, 'Locally pinned · identity not verified');
-  assert.equal(rows[2].children[0].children[3].textContent, 'Unchecked key');
+  // Routine pinned keys stay quiet; only states needing attention are shown.
+  assert.equal(rows[1].children[0].children[2].textContent, '');
+  assert.equal(rows[0].children[0].children[2].textContent, '');
+  assert.equal(rows[2].children[0].children[2].textContent, 'Key not checked');
   assert.equal(rows[2].children[0].children[0].textContent, '<b>Alex</b>');
   assert.equal(rows[2].children[0].children[0].children.length, 0);
   const value = rows[1].children[1].children[3].children[0];
@@ -499,7 +500,7 @@ test('roster refresh preserves expanded participant nodes, focus and updated key
   assert.equal(app.nodes.get('#participant-keys').children[1], peer);
   assert.equal(peer.open, true);
   assert.equal(app.document.activeElement, focused);
-  assert.equal(peer.children[0].children[3].textContent, 'KEY CHANGED; blocked');
+  assert.equal(peer.children[0].children[2].textContent, 'Key changed · messaging blocked');
   assert.equal(peer.children[1].children[3].children[0].textContent, 'ff:'.repeat(31) + 'ff');
 });
 
@@ -707,7 +708,7 @@ test('connection and device settings retain complete public ID without displayin
   app.run('updateConnectionState(true);');
   assert.equal(app.nodes.get('#connection-label').textContent, 'Live');
   assert.equal(app.nodes.get('#device-public-id').textContent, 'me');
-  assert.equal(app.nodes.get('#identity-label').textContent, 'Device me · Live');
+  assert.equal(app.nodes.get('#identity-label').textContent, 'Connected');
   app.run('updateConnectionState(false);');
   assert.equal(app.nodes.get('#connection-label').textContent, 'Polling');
   app.run('invitePending = true; updateConnectionState(false);');

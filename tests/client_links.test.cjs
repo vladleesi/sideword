@@ -209,10 +209,14 @@ test('wide preview images become a banner', () => {
   assert.equal(body.children.length, 1);
 });
 
-test('previews are off by default; turning them off hides cards and releases images', () => {
-  const off = previewClient({ mode: undefined });
-  off.run('linkPreviewMode = readLinkPreviewMode()');
-  assert.equal(off.run('linkPreviewMode'), 'off');
+test('previews are on by default; an explicit off is kept and hides cards', () => {
+  const fresh = previewClient({ mode: undefined });
+  assert.equal(fresh.run('readLinkPreviewMode()'), 'on');
+  fresh.run('stored.set(LINK_PREVIEW_KEY, "off")');
+  assert.equal(fresh.run('readLinkPreviewMode()'), 'off');
+  fresh.run('window.localStorage = { getItem() { throw new Error("denied"); } }');
+  assert.equal(fresh.run('readLinkPreviewMode()'), 'on');
+  const off = previewClient({ mode: 'off' });
   const hidden = renderLink(off, 'https://example.com/a', 'x', 'theirs', senderPreview());
   assert.equal(hidden.linkCard, undefined);
   const app = previewClient();

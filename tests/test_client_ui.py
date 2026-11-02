@@ -48,7 +48,7 @@ def test_client_retains_controls_accessibility_and_separate_mobile_views():
         "conversation-kind", "conversation-title", "participant-keys", "message-list",
         "message-form", "message-input", "send-button", "pending-sends",
         "pending-send-list", "retry-pending-sends", "reset-button", "identity-label",
-        "session-countdown", "connection-state", "status-message", "error-message",
+        "connection-state", "status-message", "error-message",
     ):
         tree.by_id(identifier)
     grid = tree.by_id("client-panel")
@@ -148,7 +148,9 @@ def test_client_fonts_are_local_and_allowed_by_its_csp():
         assert client.get("/static/client-links.js").status_code == 200
         assert (response.text.index("/static/client-links.js")
                 < response.text.index("/static/client.js"))
-        assert 'id="link-previews-on"' in response.text
+        # Link previews are on by default.
+        assert ('id="link-previews-on" type="radio" name="link-previews" value="on" checked'
+                in response.text)
         assert 'id="external-link-note"' in response.text
         for name in ("IBMPlexSans-Regular.woff2", "IBMPlexSans-Medium.woff2",
                      "IBMPlexSans-SemiBold.woff2", "IBMPlexMono-Regular.woff2", "OFL.txt"):
@@ -260,10 +262,13 @@ def test_message_details_structure_and_theme_confirmation_styles():
     details = tree.by_id("message-details")
     assert details["tag"] == "dialog"
     for identifier in ("message-details-status", "message-details-time",
-                       "message-details-recipients", "message-details-technical"):
+                       "message-details-recipients", "message-details-note"):
         assert details in tree.by_id(identifier)["parents"]
-    technical = tree.by_id("message-details-technical")
-    assert any(parent["tag"] == "details" for parent in technical["parents"])
+    # Production dialogs show delivery state only; internal IDs are not displayed.
+    html = (ROOT / "app/templates/client.html").read_text()
+    for removed in ("message-details-technical", "Technical details", "session-countdown",
+                    "Display names are labels"):
+        assert removed not in html
     css = (ROOT / "app/static/client.css").read_text()
     assert ".message-status.status-read { color: var(--signature); }" in css
     assert "--signature: var(--accent)" in css

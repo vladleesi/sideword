@@ -1,6 +1,6 @@
 # Security review
 
-**Reviewed:** 2026-11-01 · **Application:** 0.21.0. Maintainer source/test review;
+**Reviewed:** 2026-11-01 · **Application:** 0.22.0. Maintainer source/test review;
 not an independent security or cryptographic audit. [Report vulnerabilities](../SECURITY.md).
 
 ## Controls and supporting evidence
@@ -14,7 +14,7 @@ not an independent security or cryptographic audit. [Report vulnerabilities](../
 | Attachments | Strict payload/size validation, ciphertext-only relay, gesture-only paste/drop and safe explicit downloads; [client](../tests/client_attachments.test.cjs), [relay](../tests/test_attachments.py) |
 | Previews | Optional click-to-reveal mode, still-image validation, dimension/resource caps, native decode checks, viewer/composer URL cleanup and trust checks before pre-send reads; [formats/lifecycle](../tests/client_media.test.cjs), [integration](../tests/client_media_integration.test.cjs), [policy](PROTOCOL.md#local-image-previews) |
 | Links | HTTP(S)-only DOM anchors, no-referrer new tabs and lookalike warnings; [tests](../tests/client_links.test.cjs), [policy](PROTOCOL.md#links-and-link-previews) |
-| Link previews | Opt-in device setting; sender-made previews inside the encrypted payload, so recipients never fetch; strict payload validation; isolated fetcher (page tags or official/discovered oEmbed JSON, never provider HTML) with HTTPS-only, public-address and pinned connections, revalidated redirects, size/time limits and checked images; per-user limits; local re-encoding; [fetcher](../tests/test_link_preview.py), [relay](../tests/test_link_preview_relay.py), [operations](UPGRADING.md#link-preview-service) |
+| Link previews | Device setting, on by default; sender-made previews inside the encrypted payload, so recipients never fetch; strict payload validation; isolated fetcher (page tags or official/discovered oEmbed JSON, never provider HTML) with HTTPS-only, public-address and pinned connections, revalidated redirects, size/time limits and checked images; per-user limits; local re-encoding; [fetcher](../tests/test_link_preview.py), [relay](../tests/test_link_preview_relay.py), [operations](UPGRADING.md#link-preview-service) |
 | Detached media | Recipient/session-bound reads, inherited expiry, shared queue quotas and separate durable ACKs; [relay](../tests/test_media_transfer.py), [client](../tests/client_transfers.test.cjs) |
 | Capacity/browser | Bounded requests/queues, CSP with Trusted Types and framing denial on client and invite pages, text-only rendering, invite tokens removed from the URL on load, no-store, `nosniff` assets, CSRF and redacted errors; [guards](../app/guards.py), [tests](../tests/test_security_stages.py), [delivery](../tests/test_static_delivery.py) |
 | Build/deployment | Exact-image gates, non-root images, recoverable pre-1.0 resets and verified cleanup; [CI](../.github/workflows/test.yml), [deployment tests](../tests/test_deploy.py) |
