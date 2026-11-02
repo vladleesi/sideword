@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.22.1 — 2026-11-01
+
+### Backend
+
+- Redirect admin bulk deletion only to fixed admin pages instead of a path built from the request, resolving the CodeQL `py/url-redirection` alert; behavior is unchanged.
+
 ## 0.22.0 — 2026-11-01
 
 ### Web
