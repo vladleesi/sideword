@@ -424,19 +424,23 @@ async def delete_selected(
     selected = set(ids)
     if not selected or len(selected) > 500:
         raise HTTPException(status_code=400, detail="select between 1 and 500 items")
+    # Each branch names its own fixed destination: no redirect is built from request input.
     if resource == "users":
         users = await session.scalars(select(User).where(User.id.in_(selected)))
         await _delete_users(session, list(users.all()))
+        destination = "/admin/users"
     elif resource == "links":
         links = await session.scalars(select(Link).where(
             Link.id.in_(selected), Link.is_deleted == False,  # noqa: E712
         ))
         await _delete_links(session, list(links.all()))
+        destination = "/admin/links"
     elif resource == "chats":
         await _delete_chats(session, selected)
+        destination = "/admin/chats"
     else:
         raise HTTPException(status_code=404, detail="unknown resource")
-    return RedirectResponse(f"/admin/{resource}", status_code=303)
+    return RedirectResponse(destination, status_code=303)
 
 
 @router.post("/chats/{chat_id}/delete")

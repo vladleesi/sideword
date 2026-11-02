@@ -95,7 +95,7 @@ These do not establish browser/OS behavior, native interoperability or deployed 
 proxy/IAM/log/backup controls. Independent cryptographic review remains outstanding.
 
 Previous image/advisory/deployment checks were for **0.13.2**, not this release.
-One unsuppressed hosted Medium `py/url-redirection` alert remains in admin bulk deletion;
-source review limits destinations to users/links/chats. CodeQL gate tests cover failures
-and severity handling; hosted enforcement for this release remains unverified.
+Admin bulk deletion now redirects only to fixed pages, addressing the hosted Medium
+`py/url-redirection` alert; it closes once CodeQL rescans `main`. CodeQL gate tests cover
+failures and severity handling; hosted enforcement for this release remains unverified.
 Scanner policies/settings belong in [Contributing](../CONTRIBUTING.md#security-checks).

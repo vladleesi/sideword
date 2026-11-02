@@ -222,3 +222,19 @@ def test_selected_deletion_requires_authentication_and_confirmation(client):
         "ids": [link_id], "confirm": "cancel",
     }).status_code == 400
     assert token in client.get("/admin/links").text
+
+
+@pytest.mark.parametrize("resource", ["users", "links", "chats"])
+def test_bulk_deletion_redirects_only_to_its_fixed_admin_page(client, resource):
+    response = client.post(f"/admin/{resource}/delete-selected", data={
+        "ids": [987654321], "confirm": "delete"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/admin/{resource}"
+
+
+@pytest.mark.parametrize("resource", ["evil.example", "%2F%2Fevil.example", "users.."])
+def test_bulk_deletion_never_redirects_for_unknown_resources(client, resource):
+    response = client.post(f"/admin/{resource}/delete-selected", data={
+        "ids": [1], "confirm": "delete"}, follow_redirects=False)
+    assert response.status_code == 404
+    assert "location" not in response.headers
