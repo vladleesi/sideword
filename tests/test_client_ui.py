@@ -108,6 +108,10 @@ def test_client_retains_controls_accessibility_and_separate_mobile_views():
 def test_viewport_and_full_technical_value_styles():
     css = (ROOT / "app/static/client.css").read_text()
     assert "height: 100dvh" in css
+    # iOS keyboards pan the visual viewport; the fixed workspace follows its offset.
+    assert ".messenger { position: fixed; top: var(--visual-viewport-offset-top, 0px);" in css
+    assert "text-size-adjust: 100%" in css
+    assert "touch-action: manipulation" in css
     assert "grid-template-columns: 280px minmax(0, 1fr)" in css
     assert '[data-mobile-view="chats"] .conversation { display: none; }' in css
     assert '[data-mobile-view="conversation"] .chat-sidebar { display: none; }' in css

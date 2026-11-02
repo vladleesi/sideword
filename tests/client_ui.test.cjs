@@ -277,6 +277,43 @@ test('mobile keyboard viewport height updates without interfering with pinch zoo
   assert.equal(app.properties.get('--visual-viewport-height'), '800px');
 });
 
+test('iOS keyboard pan keeps the workspace and focused field visible', () => {
+  const app = client({ mobile: true });
+  assert.equal(app.properties.get('--visual-viewport-offset-top'), '0px');
+  const field = app.nodes.get('#invite-token');
+  field.tagName = 'INPUT';
+  const scrolled = [];
+  field.scrollIntoView = options => scrolled.push(options);
+  field.focus();
+  app.window.visualViewport.height = 420.4;
+  app.window.visualViewport.offsetTop = 300;
+  app.viewportEvents.get('resize')();
+  assert.equal(app.properties.get('--visual-viewport-height'), '420px');
+  assert.equal(app.properties.get('--visual-viewport-offset-top'), '300px');
+  assert.equal(JSON.stringify(scrolled), '[{"block":"nearest"}]');
+  // Panning without a resize still moves the workspace but does not scroll again.
+  app.window.visualViewport.offsetTop = 260;
+  app.viewportEvents.get('scroll')();
+  assert.equal(app.properties.get('--visual-viewport-offset-top'), '260px');
+  assert.equal(scrolled.length, 1);
+  app.window.visualViewport.height = 800;
+  app.window.visualViewport.offsetTop = 0;
+  app.viewportEvents.get('resize')();
+  assert.equal(app.properties.get('--visual-viewport-offset-top'), '0px');
+  assert.equal(scrolled.length, 1);
+});
+
+test('tapping Send keeps composer focus so the iOS keyboard stays open', () => {
+  const app = client({ mobile: true });
+  const input = app.nodes.get('#message-input');
+  const send = app.nodes.get('#send-button');
+  const prevented = () => { const event = { preventDefault() { event.defaultPrevented = true; } }; send.emit('mousedown', event); return Boolean(event.defaultPrevented); };
+  input.focus();
+  assert.equal(prevented(), true);
+  app.nodes.get('#refresh-button').focus();
+  assert.equal(prevented(), false);
+});
+
 test('message viewport resizing follows latest but keeps older reading positions', async () => {
   const app = client();
   await app.run(`(async () => {

@@ -1,3 +1,3 @@
 """Application release shared by backend/web client, independent of protocol versions."""
 
-__version__ = "0.22.2"
+__version__ = "0.22.3"

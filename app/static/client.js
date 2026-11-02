@@ -188,15 +188,34 @@ if (typeof ResizeObserver === "function") {
   messageResizeObserver.observe(elements.messageList);
 }
 
-// Dynamic viewport units alone do not account for every mobile keyboard.
+// Dynamic viewport units alone do not account for every mobile keyboard. iOS Safari
+// keeps the layout viewport and pans the visual viewport instead, so the workspace
+// follows both its height and its offset. Pinch zoom (scale above 1) is left alone.
+let workspaceViewportHeight = null;
+let workspaceViewportOffsetTop = null;
 function updateWorkspaceViewport() {
   const viewport = window.visualViewport;
   positionMessageDetails();
-  if (!viewport || viewport.scale !== 1) return;
-  document.documentElement.style.setProperty("--visual-viewport-height", `${viewport.height}px`);
+  if (!viewport || Math.abs(viewport.scale - 1) > .01) return;
+  const height = Math.round(viewport.height);
+  const offsetTop = Math.max(0, Math.round(viewport.offsetTop || 0));
+  const shrank = workspaceViewportHeight !== null && height < workspaceViewportHeight;
+  if (height !== workspaceViewportHeight) {
+    workspaceViewportHeight = height;
+    document.documentElement.style.setProperty("--visual-viewport-height", `${height}px`);
+  }
+  if (offsetTop !== workspaceViewportOffsetTop) {
+    workspaceViewportOffsetTop = offsetTop;
+    document.documentElement.style.setProperty("--visual-viewport-offset-top", `${offsetTop}px`);
+  }
+  // An opening keyboard can cover the field that caused it once the workspace shrinks.
+  const focused = document.activeElement;
+  if (shrank && ["INPUT", "TEXTAREA"].includes(focused?.tagName) && focused.scrollIntoView) {
+    focused.scrollIntoView({ block: "nearest" });
+  }
 }
 window.visualViewport?.addEventListener("resize", updateWorkspaceViewport);
-window.visualViewport?.addEventListener("scroll", positionMessageDetails);
+window.visualViewport?.addEventListener("scroll", updateWorkspaceViewport);
 updateWorkspaceViewport();
 
 // Native modal dialogs provide focus containment and Escape handling.
@@ -3066,6 +3085,12 @@ elements.activationForm.addEventListener("submit", async (event) => {
 
 elements.messageInput.addEventListener("input", event => {
   syncDraftLinkPreviews({ immediate: ["insertFromPaste", "insertFromDrop"].includes(event.inputType) });
+});
+
+// Keep focus in the composer when Send is tapped: on iOS a blur closes the keyboard,
+// and the later programmatic focus cannot reopen it without a new user gesture.
+elements.sendButton.addEventListener("mousedown", (event) => {
+  if (document.activeElement === elements.messageInput) event.preventDefault();
 });
 
 elements.messageInput.addEventListener("keydown", (event) => {

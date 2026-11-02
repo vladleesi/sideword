@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.22.3 — 2026-11-02
+
+### Web
+
+- Keep the whole mobile workspace above the on-screen keyboard, including iOS Safari, which pans the page instead of resizing it, so "Join room" and the composer are no longer cut off; the field being typed in stays in view.
+- Keep the keyboard open after tapping Send on iOS and Android, show Go and Send keyboard keys, and stop double-tap zoom and landscape text inflation on controls.
+
 ## 0.22.2 — 2026-11-02
 
 ### Backend
