@@ -108,7 +108,7 @@ function client({ mobile = false, clipboardBlocked = false, viewportAware = fals
     replaceState(state) { this.state = structuredClone(state); },
   };
   const context = vm.createContext({ TextEncoder, TextDecoder, DOMException, AbortController,
-    Headers, URL,
+    Headers, URL, URLSearchParams,
     performance: { now: () => window.now || 0 },
     Intl: { DateTimeFormat: function (_, options) {
       return new Intl.DateTimeFormat(locale, { ...options, ...(timeZone ? {timeZone} : {}) });

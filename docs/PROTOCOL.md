@@ -1,6 +1,6 @@
 # Browser test-client P-256 protocol v1
 
-Unaudited; no recipient forward secrecy or post-compromise recovery. Backend, HTTP
+No recipient forward secrecy or post-compromise recovery. Backend, HTTP
 API, application payload and cryptographic envelope versions are independent.
 `client-protocol.js` owns Web Crypto/payload operations; `client-media.js` owns local
 preview validation/resources; `client-links.js` owns link detection; `client.js` owns
@@ -41,7 +41,14 @@ Plaintext JSON has exactly one of these field sets:
 {"v":1,"type":"attachment","name":"example.bin","mime":"application/octet-stream","size":3,"data":"AP8B"}
 ```
 
-- Text: 1–16,000 UTF-8 bytes; arbitrary user text always goes inside `text`.
+- Text: 1–16,000 UTF-8 bytes; arbitrary user text always goes inside `text`. An optional
+  sender-made `preview` describes the first HTTPS link in `text`:
+  `{"url":"https://example.com/","title":"…","description":null,"site_name":null,"final_host":null,"image":{"mime":"image/jpeg","data":"<base64>"}}`.
+  All six fields are required (`null` when absent): normalized credential-free HTTPS `url`
+  up to 2,048 characters; `title` ≤200, `description` ≤400, `site_name` ≤80 characters
+  without control characters; lowercase `final_host`; `image` null or canonical base64 of
+  a JPEG up to 96 KiB. At least one of title, description or image is set. Clients before
+  0.20.0 reject such payloads; they stay queued until the client is reloaded.
 - Attachment: `size` integer 0–1,048,576; `data` canonical padded standard base64,
   decoded length exactly `size`; nonempty `name` at most 255 UTF-16 code units;
   `mime` 0–127 printable ASCII characters, including empty.
@@ -152,11 +159,20 @@ are unchanged.
 Hosts with text before `@`, mixed scripts or Latin lookalike letters get an inline warning;
 this is a heuristic, not a full confusable check.
 
-Previews are off until enabled in device settings and offered by the server. Then the first
-HTTPS link of each rendered text message is sent to the [link-preview API](API.md#link-previews),
-up to three at a time, newest first, one request per address. Text renders with
-`textContent`; images are validated and re-encoded locally to a small JPEG shown from a Blob
-URL. Results stay in tab memory only; without a preview, nothing is shown under the link.
+Previews are made by the sender and sent inside the encrypted `text` payload, so recipients
+never fetch anything and link owners cannot see when a message is opened. With the device
+setting on and the server offering previews, the draft's first HTTPS link is sent to the
+[link-preview API](API.md#link-previews) once it looks complete (followed by text, pasted,
+or after a pause); removing it cancels the request and drops the result. Send never waits or
+starts a request: a preview not loaded yet is left out. The image is included only when every
+recipient copy stays within half the send limit. Previews live in encrypted history
+with their message.
+
+Recipients show a preview only if its `url` is the message's first previewable link, revalidate
+images locally, and always show the link's own host. Preview text is sender-controlled and can
+be misleading, like any message text. Text renders with `textContent`; images are shown from
+Blob URLs. The setting also hides received previews; without one, nothing is shown under the
+link.
 
 ## Identity checks and local state
 

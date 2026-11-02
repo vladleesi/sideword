@@ -16,6 +16,7 @@ from ..config import get_settings
 from ..db import get_session
 from ..models import Chat, Link, LinkType
 from ..templates import templates
+from .client import CLIENT_HEADERS
 
 router = APIRouter(tags=["landing"])
 
@@ -81,4 +82,6 @@ async def landing(
             "details": details,
             "public_url": _settings.public_url,
         },
+        # The URL carries an invite credential: same locked-down policy as the client.
+        headers=CLIENT_HEADERS,
     )

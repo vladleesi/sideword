@@ -906,3 +906,13 @@ for (const [dialogId,buttonId] of [['#conversation-details','#conversation-detai
     assert.equal(app.document.activeElement,button);
   });
 }
+
+test('invite credentials are removed from the address bar and history entry on load', () => {
+  const app = client();
+  app.run(`globalThis.replaced = []; history.state = { view: 'chats' };
+    history.replaceState = (state, title, url) => replaced.push([state, url]);
+    window.location = { search: '?invite=secret-token', pathname: '/client', assign() {} }; scrubInviteFromUrl();
+    window.location = { search: '?other=1', pathname: '/client', assign() {} }; scrubInviteFromUrl();
+    window.location = { search: '', pathname: '/client', assign() {} }; scrubInviteFromUrl();`);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.run('replaced'))), [[{ view: 'chats' }, '/client']]);
+});

@@ -20,6 +20,9 @@ cannot guarantee physical erasure from SSDs, old backups, snapshots or host memo
 
 ## Upgrade
 
+0.20.0 adds an optional encrypted link-preview field to text messages. Clients before 0.20.0
+reject those messages, which stay queued until the client is reloaded with matching assets.
+
 0.17.0 adds a detached media queue channel. Use matching server/client assets and a fresh
 pre-release database; no schema or inline-attachment wire migration is provided. Text/card
 ACKs and media ACKs are independent; see [media delivery](PROTOCOL.md#independent-media-delivery).
@@ -94,7 +97,8 @@ Use the target release's matching code/assets/backup, test offline and follow
 
 Previews are off unless the relay has `SIDEWORD_LINK_PREVIEW_SERVICE_URL` and
 `SIDEWORD_LINK_PREVIEW_TOKEN` (32+ random characters). The relay authenticates and
-rate-limits users, then forwards to a separate fetcher; it never fetches URLs itself.
+rate-limits users, then forwards to a separate fetcher; it never fetches URLs itself. Only
+senders request previews; recipients receive them inside encrypted messages.
 Previews use their own concurrency limit, not the message request slots.
 
 Run the fetcher with [docker-compose.link-preview.yml](../docker-compose.link-preview.yml):

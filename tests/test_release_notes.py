@@ -26,6 +26,29 @@ def test_release_notes_select_matching_section():
     )
 
 
+def test_release_notes_keep_backend_and_client_subsections():
+    changelog = (
+        "# Changelog\n\n## 0.5.0 — 2026-11-01\n\n### Backend\n\n- Server change.\n\n"
+        "### Web\n\n- Client change.\n- Another.\n\n## 0.4.0 — 2026-10-06\n\n- Older.\n"
+    )
+    assert release_notes(changelog, "0.5.0") == (
+        "## 0.5.0 — 2026-11-01\n\n### Backend\n\n- Server change.\n\n"
+        "### Web\n\n- Client change.\n- Another.\n"
+    )
+
+
+@pytest.mark.parametrize("body", [
+    "### Backend\n\n### Web\n\n- Empty backend.\n",
+    "### Backend\n\n- One.\n\n### Backend\n\n- Duplicate.\n",
+    "- Loose bullet.\n\n### Web\n\n- Grouped.\n",
+    "### Web\n",
+    "### Other\n\n- Unknown subsection.\n",
+])
+def test_release_notes_reject_malformed_subsections(body):
+    with pytest.raises(ValueError):
+        release_notes(f"## 0.5.0 — 2026-11-01\n\n{body}", "0.5.0")
+
+
 @pytest.mark.parametrize("version", ["v0.4.0", "0.4", "0.04.0", "0.4.0\n", "0.4.0-beta"])
 def test_release_notes_reject_invalid_version(version):
     with pytest.raises(ValueError, match="MAJOR.MINOR.PATCH"):

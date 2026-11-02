@@ -110,7 +110,7 @@ h3 { font-size: .9rem; font-weight: 600; }
 .message-list > * { flex-shrink: 0; }
 .message-list[data-follow-latest="true"] { overflow-anchor: none; }
 .empty-state { margin: auto; padding: 1rem; color: var(--muted); text-align: center; font-size: .875rem; }
-.message { display: flex; flex-direction: column; align-items: flex-start; align-self: flex-start; width: fit-content; min-width: 0; max-width: min(88%, 38rem); margin-top: .9rem; overflow-wrap: anywhere; }
+.message { display: flex; flex-direction: column; align-items: flex-start; align-self: flex-start; width: fit-content; min-width: 0; max-width: min(84%, 34rem); margin-top: .9rem; overflow-wrap: anywhere; }
 .message:first-child { margin-top: 0; }
 .message.continuation { margin-top: .25rem; }
 .message.mine { align-self: flex-end; align-items: flex-end; }
@@ -123,6 +123,8 @@ h3 { font-size: .9rem; font-weight: 600; }
 .message-content { display: inline; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--sans); }
 /* Reserve status space only on the final line, including when it wraps. */
 .message.mine .message-content::after { content: ""; display: inline-block; width: calc(28px + .35em); height: 1em; }
+/* Text lines stay near 70 characters; media and link previews stay compact cards. */
+.message:has(.attachment-card, .link-card) { max-width: min(84%, 24rem); }
 .message.system { align-self: center; max-width: min(100%, 42rem); color: var(--muted); }
 .message.system .message-bubble { padding: .2rem .5rem; background: transparent; font-size: .75rem; }
 .message.system .message-content { font-size: .75rem; }
@@ -137,18 +139,18 @@ h3 { font-size: .9rem; font-weight: 600; }
 input:not([type="radio"]), textarea { width: 100%; min-width: 0; border: 1px solid var(--control-border); border-radius: 2px; background: var(--bg); color: var(--text); padding: .65rem .75rem; }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 input[aria-invalid="true"] { border-color: var(--danger); }
-textarea { resize: vertical; min-height: 64px; max-height: min(180px, 25dvh); }
+textarea { resize: vertical; min-height: 64px; max-height: min(180px, 25vh); max-height: min(180px, 25dvh); }
 textarea:disabled { color: var(--muted); }
 .composer .button { min-height: 44px; }
 #composer-help { color: var(--muted); font-size: .7rem; }
 .pending-sends { grid-column: 1 / -1; border-top: 1px solid var(--danger); padding: .4rem 1rem .65rem; background: var(--surface); overflow-wrap: anywhere; }
 .pending-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-#pending-send-list { max-height: 18dvh; overflow-y: auto; margin: .25rem 0 0; padding-left: 1.25rem; font-size: .85rem; }
+#pending-send-list { max-height: 18vh; max-height: 18dvh; overflow-y: auto; margin: .25rem 0 0; padding-left: 1.25rem; font-size: .85rem; }
 #pending-send-list li { margin-bottom: .4rem; }
 #pending-send-list button { margin-left: .5rem; min-height: 36px; border: 1px solid var(--control-border); border-radius: 2px; color: var(--text); background: var(--bg); padding: .3rem .5rem; cursor: pointer; }
 .notifications { flex-shrink: 0; }
 .toast { padding: .65rem 1rem; background: var(--surface); color: var(--text); border-top: 1px solid var(--border); font-size: .85rem; overflow-wrap: anywhere; }
-.notifications .toast { max-height: 22dvh; overflow-y: auto; }
+.notifications .toast { max-height: 22vh; max-height: 22dvh; overflow-y: auto; }
 .toast.error { background: var(--warning-bg); color: var(--danger); border-color: var(--danger); }
 .setup-panel { width: min(100%, 440px); margin: auto; padding: 1.5rem; background: var(--bg); }
 .setup-panel > .eyebrow { margin-bottom: .65rem; }
@@ -170,7 +172,7 @@ textarea:disabled { color: var(--muted); }
 .invite-token summary { min-height: 40px; cursor: pointer; color: var(--muted); font-size: .85rem; }
 .invite-token code { margin-block: .25rem .75rem; }
 .client-footer { padding: 1rem; color: var(--muted); font-size: .75rem; text-align: center; }
-.context-dialog { width: min(520px, calc(100% - 1.5rem)); max-height: calc(100dvh - 2rem); padding: 0; border: 1px solid var(--control-border); border-radius: 3px; background: var(--bg); color: var(--text); overflow: hidden; }
+.context-dialog { width: min(520px, calc(100% - 1.5rem)); max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem); padding: 0; border: 1px solid var(--control-border); border-radius: 3px; background: var(--bg); color: var(--text); overflow: hidden; }
 .context-dialog[open] { display: flex; flex-direction: column; }
 .context-dialog::backdrop { background: rgb(0 0 0 / .5); }
 .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-shrink: 0; padding: .65rem 1rem; border-bottom: 1px solid var(--border); }
@@ -178,7 +180,7 @@ textarea:disabled { color: var(--muted); }
 .dialog-content p { margin-bottom: .75rem; }
 .dialog-content section + section { margin-top: 1.25rem; }
 .dialog-content h3 { margin-bottom: .75rem; }
-.context-dialog.message-details { position: fixed; inset: auto; margin: 0; width: min(352px, calc(100% - 1.5rem)); max-height: calc(100dvh - 1.5rem); border-color: var(--border); border-radius: 2px; }
+.context-dialog.message-details { position: fixed; inset: auto; margin: 0; width: min(352px, calc(100% - 1.5rem)); max-height: calc(100vh - 1.5rem); max-height: calc(100dvh - 1.5rem); border-color: var(--border); border-radius: 2px; }
 .context-dialog.message-details::backdrop { background: transparent; }
 .message-details .dialog-heading { padding: .5rem .75rem; }
 .message-details .dialog-heading h2 { font-size: .9375rem; }
@@ -239,7 +241,7 @@ textarea:disabled { color: var(--muted); }
   .messenger .conversation-meta { gap: .15rem .5rem; font-size: .6875rem; line-height: 1.25; }
   .message-list { padding: 1rem .75rem; }
   .message { max-width: 92%; }
-  .context-dialog.message-details { inset: auto 0 0 !important; width: 100%; max-width: none; max-height: 80dvh; border-radius: 3px 3px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .context-dialog.message-details { inset: auto 0 0 !important; width: 100%; max-width: none; max-height: 80vh; max-height: 80dvh; border-radius: 3px 3px 0 0; padding-bottom: env(safe-area-inset-bottom); }
   .context-dialog.message-details::backdrop { background: rgb(0 0 0 / .35); }
   .composer { padding-inline: .75rem; }
   .pending-sends { padding-inline: .75rem; }
@@ -328,6 +330,16 @@ textarea:disabled { color: var(--muted); }
 .media-loading::before { content: ""; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: media-spin .8s linear infinite; }
 @keyframes media-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .media-loading::before { animation: none; } }
+/* Chat image skeleton: fills the reserved frame with a soft flat pulse and a faint picture glyph.
+   The status text is not drawn but stays available to assistive technology. */
+.media-preview > .media-loading { position: relative; align-self: stretch; flex: 1; min-height: 0; overflow: hidden; border-radius: 4px; background: var(--surface-alt); color: transparent; font-size: 0; user-select: none; }
+.media-preview > .media-loading::before { position: absolute; inset: 0; width: auto; height: auto; border: 0; border-radius: 0; background: var(--border); opacity: 0; animation: media-pulse 1.6s ease-in-out infinite; }
+.media-preview > .media-loading::after { content: ""; width: 32px; height: 32px; background: var(--muted); opacity: .4; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Ccircle cx='9' cy='10' r='1.5'/%3E%3Cpath d='m21 16-5-5-9 9'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Ccircle cx='9' cy='10' r='1.5'/%3E%3Cpath d='m21 16-5-5-9 9'/%3E%3C/svg%3E") center / contain no-repeat; }
+@keyframes media-pulse { 50% { opacity: .45; } }
+.media-image { animation: media-fade-in .25s ease-out; }
+@keyframes media-fade-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .media-preview > .media-loading::before, .media-image { animation: none; } }
+@media (forced-colors: active) { .media-preview > .media-loading { border: 1px solid CanvasText; } .media-preview > .media-loading::after { background: CanvasText; } }
 
 .attachment-card .file-icon { width: 18px; height: 22px; }
 @media (pointer: coarse) { .attachment-card { grid-template-columns: 28px minmax(0, 1fr) 44px; } .attachment-card .attachment-download { width: 44px; min-height: 44px; } }
@@ -343,7 +355,7 @@ textarea:disabled { color: var(--muted); }
 .file-tile.media-loading::before { position: absolute; width: 14px; height: 14px; }
 .file-tile.media-loading .file-icon { opacity: .35; }
 .attachment-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
-.context-dialog.image-viewer { width: min(1100px, calc(100% - 1.5rem)); height: calc(100dvh - 2rem); max-width: none; }
+.context-dialog.image-viewer { width: min(1100px, calc(100% - 1.5rem)); height: calc(100vh - 2rem); height: calc(100dvh - 2rem); max-width: none; }
 .image-viewer .dialog-heading { flex-wrap: wrap; padding: .5rem .75rem; }
 .image-viewer .dialog-heading h2 { font-size: .9375rem; }
 .viewer-controls { display: flex; flex-wrap: wrap; gap: .35rem; }
@@ -355,7 +367,7 @@ textarea:disabled { color: var(--muted); }
 .image-viewer .viewer-error { margin: .5rem .75rem; }
 .viewer-error:empty { display: none; }
 @media (max-width: 760px) {
-  .context-dialog.image-viewer { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; padding-bottom: env(safe-area-inset-bottom); }
+  .context-dialog.image-viewer { width: 100%; height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh; border-radius: 0; padding-bottom: env(safe-area-inset-bottom); }
   .image-stage { padding: .25rem; }
 }
 @media (forced-colors: active) { .media-open:focus-visible, .image-stage:focus-visible { outline-color: Highlight; } }
@@ -367,8 +379,10 @@ textarea:disabled { color: var(--muted); }
 .message-link.suspicious-link { text-decoration-style: wavy; text-decoration-color: var(--danger); }
 .message-link:focus-visible, .link-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Compact preview card: clamped text (title 3, description 4 lines), fixed image boxes. */
-/* Contributes 20rem to the bubble width, then fills the bubble when the text is wider. */
-.link-card { display: block; width: 20rem; min-width: 100%; max-width: 100%; margin-top: .45rem; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-family: var(--sans); text-decoration: none; }
+/* One preview width, as in common messengers: the card is fixed and the bubble matches it,
+   so text wraps inside instead of stretching the card. Narrow screens shrink both. */
+.message-bubble:has(> .link-card) { width: calc(20rem + 1.3rem); }
+.link-card { display: block; width: 20rem; max-width: 100%; margin-top: .45rem; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-family: var(--sans); text-decoration: none; }
 .link-card:hover { border-color: var(--control-border); }
 .link-card.suspicious-link { border-color: var(--danger); }
 .link-card-banner { display: block; width: 100%; aspect-ratio: 1.91 / 1; object-fit: cover; background: var(--surface); border-bottom: 1px solid var(--border); }

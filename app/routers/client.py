@@ -9,15 +9,18 @@ from ..templates import templates
 
 router = APIRouter(tags=["test-client"])
 
-_CLIENT_HEADERS = {
+# Shared by the client and invite pages. The client scripts use no HTML or script sinks, so
+# Trusted Types can forbid them outright; browsers without Trusted Types ignore those directives.
+CLIENT_HEADERS = {
     "Cache-Control": "no-store",
     "Content-Security-Policy": (
         "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; "
         "img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; "
-        "form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+        "form-action 'self'; frame-ancestors 'none'; object-src 'none'; "
+        "require-trusted-types-for 'script'; trusted-types 'none'"
     ),
     "Cross-Origin-Opener-Policy": "same-origin",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -33,5 +36,5 @@ async def test_client(request: Request, invite: str = "") -> HTMLResponse:
         request,
         "client.html",
         {"invite_token": safe_invite},
-        headers=_CLIENT_HEADERS,
+        headers=CLIENT_HEADERS,
     )

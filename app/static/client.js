@@ -14,9 +14,12 @@ const REQUEST_TIMEOUT_MS = 15000;
 const IMAGE_PREVIEW_KEY = "sideword-client-image-previews";
 // Link previews are off until chosen on this device; when on, rendered links load previews.
 const LINK_PREVIEW_KEY = "sideword-client-link-previews";
-const LINK_PREVIEW_CACHE_SIZE = 50;
+// Memory only, for the sender's draft; sent previews live in the message's encrypted history.
+const LINK_PREVIEW_CACHE_SIZE = 20;
 const LINK_PREVIEW_RETRY_MS = 10000;
 const LINK_PREVIEW_PARALLEL = 3;
+// Draft URLs are prefetched once they look complete: followed by text, pasted, or after a pause.
+const LINK_PREFETCH_IDLE_MS = 700;
 // Wide images become a banner; others a small square thumbnail.
 const LINK_BANNER = { bytes: 96 * 1024, dimension: 640 };
 const LINK_THUMBNAIL = { bytes: 24 * 1024, dimension: 160 };
@@ -104,6 +107,11 @@ const linkPreviewPending = new Map();
 const linkPreviewUrls = new Map();
 let linkPreviewGeneration = 0;
 let linkPreviewDrainScheduled = false;
+// Addresses fetched only for the unsent draft; discarded if they leave the draft before sending.
+const draftLinkPreviews = new Set();
+let draftPrefetchTimer = null;
+// Payload preview -> decoded card data, so re-renders do not decode images again.
+const decodedLinkPreviews = new WeakMap();
 // In-memory reveals only: reload returns incoming images to the selected privacy mode.
 const revealedImages = new Set();
 let requestedPreview = null;
@@ -684,49 +692,61 @@ async function readHistoryRecords(recordPrefix = null) {
   });
 }
 
+// Local records are AES-GCM encrypted with the device storage key; the record key is the AAD.
+async function sealLocalRecord(key, value) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: encoder.encode(key) },
+    identity.storageKey,
+    encoder.encode(JSON.stringify(value)),
+  );
+  return { iv, ciphertext };
+}
+
+async function openLocalRecord(key, record) {
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: record.iv, additionalData: encoder.encode(key) },
+    identity.storageKey,
+    record.ciphertext,
+  );
+  return JSON.parse(decoder.decode(plaintext));
+}
+
 async function persistHistoryEntry(chatId, entry, allowed = null) {
   if (!identity?.storageKey || !identity.publicId || !entry.id) {
     throw new ClientError("Local history storage is unavailable: this device's history key or identity is missing. Message retained for retry.");
   }
   const key = historyKey(chatId, entry.id);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: encoder.encode(key) },
-    identity.storageKey,
-    encoder.encode(JSON.stringify(entry)),
-  );
-  return putDatabaseValue(key, { iv, ciphertext }, null, allowed);
+  return putDatabaseValue(key, await sealLocalRecord(key, entry), null, allowed);
 }
 
 async function loadStoredHistory() {
   if (!identity?.storageKey || !identity.publicId) return;
   if (!messagesByChat.size) { loadedHistoryKeys.clear(); receivedMedia.clear(); revealedImages.clear(); }
-  const records = await readHistoryRecords();
-  for (const record of records) {
-    if (loadedHistoryKeys.has(record.key)) continue;
+  const records = (await readHistoryRecords()).filter(record => !loadedHistoryKeys.has(record.key));
+  // Decrypt in parallel, then append without per-record renders: one layout for the whole load.
+  const decrypted = await Promise.all(records.map(async record => {
     try {
-      const plaintext = await crypto.subtle.decrypt(
-        {
-          name: "AES-GCM",
-          iv: record.value.iv,
-          additionalData: encoder.encode(record.key),
-        },
-        identity.storageKey,
-        record.value.ciphertext,
-      );
-      const parts = record.key.split(":");
-      const chatId = Number(parts[2]);
-      const entry = JSON.parse(decoder.decode(plaintext));
+      const entry = await openLocalRecord(record.key, record.value);
       if (entry.attachment) SidewordProtocol.validatePayload(entry.attachment);
-      await appendMessage(chatId, entry, false);
-      loadedHistoryKeys.add(record.key);
+      return { record, chatId: Number(record.key.split(":")[2]), entry };
     } catch {
-      // Ignore corrupted local records; authenticated decryption prevents use.
+      return null; // Ignore corrupted local records; authenticated decryption prevents use.
     }
+  }));
+  let selectedChanged = false;
+  for (const item of decrypted) {
+    if (!item || loadedHistoryKeys.has(item.record.key)) continue;
+    try {
+      await appendMessage(item.chatId, item.entry, false, false);
+      loadedHistoryKeys.add(item.record.key);
+      selectedChanged ||= item.chatId === selectedChatId;
+    } catch { /* Keep loading other records. */ }
   }
   for (const entries of messagesByChat.values()) {
     entries.sort(compareHistoryEntries);
   }
+  if (selectedChanged) renderMessages();
 }
 
 function showToast(message, isError = false) {
@@ -971,7 +991,7 @@ async function decryptMessage(message) {
   return SidewordProtocol.decryptMessage(identity, message, sender);
 }
 
-async function appendMessage(chatId, entry, persist = true) {
+async function appendMessage(chatId, entry, persist = true, render = true) {
   const entries = messagesByChat.get(chatId) || [];
   if (entry.id && entries.some((candidate) => candidate.id === entry.id)) {
     return Promise.resolve();
@@ -983,7 +1003,7 @@ async function appendMessage(chatId, entry, persist = true) {
   entries.sort(compareHistoryEntries);
   messagesByChat.set(chatId, entries);
   indexMessageMetadata(chatId, entry);
-  if (selectedChatId === chatId) renderMessages();
+  if (render && selectedChatId === chatId) renderMessages();
 }
 
 function serverTimestamp(value) {
@@ -1443,7 +1463,6 @@ function renderMessages(openAtLatest = false) {
   if (changedChat) {
     mediaPreviews?.clear();
     releaseAllLinkPreviews();
-    linkPreviewQueue.clear();
     messageVisibilityObserver?.disconnect();
     visibleMessageNodes.clear();
     refreshVisibleReads();
@@ -1740,39 +1759,45 @@ function previewableLink(link) {
   return link.protocol === "https:" && !link.port && !link.credentials;
 }
 
-// One preview per message for its first previewable link; nothing renders unless it loads.
+// Previews are made by the sender and travel inside the encrypted message, so rendering never
+// contacts any server: a link's owner cannot learn when a recipient opened the message.
 function updateLinkPreview(message) {
-  const link = linkPreviewMode === "on" && linkPreviewsAvailable && !message.messageEntry.attachment
-    ? (message.messageLinks || []).find(previewableLink) : null;
-  const key = link?.href || "";
-  if ((message.linkPreviewKey || "") === key) return;
+  const preview = linkPreviewMode === "on" && !message.messageEntry.attachment ? messagePreview(message) : null;
+  const key = preview?.url || "";
+  if ((message.linkPreviewKey || "") === key && Boolean(message.linkCard) === Boolean(key)) return;
   releaseLinkPreview(message);
-  message.linkPreviewKey = key;
-  if (!link) return;
-  if (linkPreviewResults.has(key)) {
-    const preview = linkPreviewResults.get(key);
-    if (preview) showLinkPreview(message, link, preview);
-    return;
-  }
-  const waiting = linkPreviewPending.get(key) || linkPreviewQueue.get(key) || { link, messages: new Set() };
-  waiting.messages.add(message);
-  if (linkPreviewPending.has(key)) return;
-  // Re-inserting keeps the newest request last, so recently rendered links load first.
-  linkPreviewQueue.delete(key);
-  linkPreviewQueue.set(key, waiting);
-  // Start after the current render has queued all its links, so the newest load first.
-  if (!linkPreviewDrainScheduled) {
-    linkPreviewDrainScheduled = true;
-    void Promise.resolve().then(() => { linkPreviewDrainScheduled = false; drainLinkPreviews(); });
-  }
+  if (!preview) return;
+  showLinkPreview(message, (message.messageLinks || []).find(previewableLink), preview);
 }
 
-// Bounded parallel loading, newest first; one request per address even with many messages.
+// The payload preview must describe the message's first previewable link; anything else is ignored.
+function messagePreview(message) {
+  const preview = message.messageEntry.preview;
+  const link = (message.messageLinks || []).find(previewableLink);
+  if (!preview || !link || preview.url !== link.href) return null;
+  if (!decodedLinkPreviews.has(preview)) decodedLinkPreviews.set(preview, displayLinkPreview(preview));
+  return decodedLinkPreviews.get(preview);
+}
+
+function displayLinkPreview(preview) {
+  let image = null;
+  if (preview.image) {
+    try {
+      const bytes = SidewordProtocol.base64ToBytes(preview.image.data);
+      const info = globalThis.SidewordMedia?.inspect(bytes, "image/jpeg");
+      if (info) image = { bytes, banner: info.width >= 300 && info.width / info.height >= 1.3 };
+    } catch { image = null; }
+  }
+  return { url: preview.url, title: preview.title, description: preview.description,
+    siteName: preview.site_name, finalHost: preview.final_host, image };
+}
+
+// Bounded parallel loading for the sender's draft; one request per address.
 function drainLinkPreviews() {
   while (linkPreviewPending.size < LINK_PREVIEW_PARALLEL && linkPreviewQueue.size && linkPreviewMode === "on") {
     const [key, waiting] = [...linkPreviewQueue].at(-1);
     linkPreviewQueue.delete(key);
-    if (![...waiting.messages].some(message => message.linkPreviewKey === key)) continue;
+    if (!draftLinkPreviews.has(key)) continue;
     linkPreviewPending.set(key, waiting);
     void loadLinkPreview(key, waiting);
   }
@@ -1780,25 +1805,22 @@ function drainLinkPreviews() {
 
 async function loadLinkPreview(key, waiting) {
   const generation = linkPreviewGeneration;
+  waiting.controller = new AbortController();
   try {
-    const preview = await fetchLinkPreview(waiting.link);
-    if (generation !== linkPreviewGeneration) return; // Turned off or session changed meanwhile.
-    rememberLinkPreview(key, preview);
-    if (!preview) return;
-    for (const message of waiting.messages) {
-      if (message.linkPreviewKey === key) showLinkPreview(message, waiting.link, preview);
-    }
+    const preview = await fetchLinkPreview(waiting.link, waiting.controller.signal);
+    // Turned off, session changed, or the draft dropped this address meanwhile: keep nothing.
+    if (generation === linkPreviewGeneration && draftLinkPreviews.has(key)) rememberLinkPreview(key, preview);
   } finally {
     if (linkPreviewPending.get(key) === waiting) linkPreviewPending.delete(key);
     drainLinkPreviews();
   }
 }
 
-// Failures return null, so the message keeps only its inline link.
-async function fetchLinkPreview(link) {
-  for (let attempt = 0; attempt < 3; attempt++) {
+// Failures return null, so the message is sent with its inline link only.
+async function fetchLinkPreview(link, signal) {
+  for (let attempt = 0; attempt < 3 && !signal?.aborted; attempt++) {
     try {
-      const result = await api("/api/v1/link-previews", { method: "POST", body: JSON.stringify({ url: link.href }) });
+      const result = await api("/api/v1/link-previews", { method: "POST", body: JSON.stringify({ url: link.href }), signal });
       const preview = checkedLinkPreview(result);
       if (preview) preview.image = await linkPreviewImage(result.image);
       return preview;
@@ -1854,6 +1876,32 @@ function rememberLinkPreview(href, preview) {
   while (linkPreviewResults.size > LINK_PREVIEW_CACHE_SIZE) linkPreviewResults.delete(linkPreviewResults.keys().next().value);
 }
 
+// At send time: the draft's already loaded preview for the message's first previewable link.
+// Sending never waits and starts no request; without a ready preview the message is sent as is.
+function sendLinkPreview(text, recipientCount) {
+  if (linkPreviewMode !== "on") return null;
+  const link = (globalThis.SidewordLinks?.findLinks(text) || []).find(previewableLink);
+  const preview = link ? linkPreviewResults.get(link.href) : null;
+  if (!preview) return null;
+  const payload = { url: link.href, title: preview.title, description: preview.description,
+    site_name: preview.siteName, final_host: preview.finalHost, image: null };
+  // Each recipient gets its own copy: include the image only when all copies stay well in budget.
+  if (preview.image && preview.image.bytes.length <= SidewordProtocol.MAX_PREVIEW_IMAGE_BYTES
+      && (preview.image.bytes.length * 2 + 4096) * recipientCount <= SidewordProtocol.MAX_SEND_BYTES / 2) {
+    payload.image = { mime: "image/jpeg", data: SidewordProtocol.bytesToBase64(preview.image.bytes) };
+  }
+  return payload.title || payload.description || payload.image ? payload : null;
+}
+
+// A preview never blocks or delays sending: anything unusable falls back to the plain text payload.
+function textPayloadWithPreview(text, recipientCount) {
+  try {
+    const preview = sendLinkPreview(text, recipientCount);
+    if (preview) return SidewordProtocol.textPayload(text, preview);
+  } catch { /* Send the message without a preview. */ }
+  return SidewordProtocol.textPayload(text);
+}
+
 function linkPreviewPart(tag, className, text) {
   const node = document.createElement(tag);
   node.className = className;
@@ -1862,24 +1910,20 @@ function linkPreviewPart(tag, className, text) {
 }
 
 // Compact card: optional banner, host and site line, title, description and side thumbnail.
-function showLinkPreview(message, link, preview) {
-  releaseLinkPreview(message);
-  message.linkPreviewKey = link.href;
+function createLinkCard(link, preview) {
   const card = document.createElement("a");
   card.className = link.warnings.length ? "link-card suspicious-link" : "link-card";
   externalLinkAttributes(card, link);
   // The inline link is the keyboard target; the card is an equivalent pointer target.
   card.tabIndex = -1;
-  let url = null;
-  if (preview.image) {
-    url = URL.createObjectURL(new Blob([preview.image.bytes], { type: "image/jpeg" }));
-    linkPreviewUrls.set(message, url);
-  }
+  const url = preview.image ? URL.createObjectURL(new Blob([preview.image.bytes], { type: "image/jpeg" })) : null;
+  const images = [];
   const image = className => {
     const node = linkPreviewPart("img", className);
     node.alt = "";
     node.decoding = "async";
     node.src = url;
+    images.push(node);
     return node;
   };
   if (url && preview.image.banner) card.append(image("link-card-banner"));
@@ -1897,9 +1941,34 @@ function showLinkPreview(message, link, preview) {
   body.append(text);
   if (url && !preview.image.banner) body.append(image("link-card-thumbnail"));
   card.append(body);
-  message.linkCard = card;
-  (message.linkWarning || message.messageContent).after(card);
+  return { card, url, images };
+}
+
+function placeLinkCard(message, link, created) {
+  releaseLinkPreview(message);
+  message.linkPreviewKey = link.href;
+  if (created.url) linkPreviewUrls.set(message, created.url);
+  message.linkCard = created.card;
+  (message.linkWarning || message.messageContent).after(created.card);
   updateLinkLayout(message);
+}
+
+function showLinkPreview(message, link, preview) {
+  placeLinkCard(message, link, createLinkCard(link, preview));
+}
+
+// Keeps the first visible message in place when content above it changes size; following the
+// latest message is already handled by the resize observer. Works without CSS scroll anchoring.
+function keepScrollPosition(change) {
+  const list = elements.messageList;
+  if (followResizedMessages || !conversationVisible()) { change(); return; }
+  const top = list.getBoundingClientRect().top;
+  const anchor = [...list.children].find(node => node.getBoundingClientRect().bottom > top);
+  const before = anchor?.getBoundingClientRect().top;
+  change();
+  if (anchor && anchor.isConnected !== false && before !== undefined) {
+    list.scrollTop += anchor.getBoundingClientRect().top - before;
+  }
 }
 
 function releaseLinkPreview(message) {
@@ -1922,9 +1991,46 @@ function releaseAllLinkPreviews() {
 
 function resetLinkPreviewRequests() {
   linkPreviewGeneration++;
+  for (const waiting of linkPreviewPending.values()) waiting.controller?.abort();
   linkPreviewQueue.clear();
   linkPreviewPending.clear();
   linkPreviewResults.clear();
+  draftLinkPreviews.clear();
+  window.clearTimeout(draftPrefetchTimer);
+}
+
+// Prefetch the draft's previewable link so the sent message renders with its card at once.
+function syncDraftLinkPreviews({ immediate = false } = {}) {
+  window.clearTimeout(draftPrefetchTimer);
+  const text = elements.messageInput.value;
+  const link = (globalThis.SidewordLinks?.findLinks(text) || []).find(previewableLink);
+  for (const href of [...draftLinkPreviews]) if (href !== link?.href) discardDraftLinkPreview(href);
+  if (!link || linkPreviewMode !== "on" || !linkPreviewsAvailable) return;
+  // A URL at the very end may still be typed; wait for following text, a paste, or a pause.
+  if (immediate || link.end < text.length) prefetchLinkPreview(link);
+  else draftPrefetchTimer = window.setTimeout(() => syncDraftLinkPreviews({ immediate: true }), LINK_PREFETCH_IDLE_MS);
+}
+
+function prefetchLinkPreview(link) {
+  const key = link.href;
+  draftLinkPreviews.add(key);
+  if (linkPreviewResults.has(key) || linkPreviewPending.has(key) || linkPreviewQueue.has(key)) return;
+  linkPreviewQueue.set(key, { link });
+  scheduleLinkPreviewDrain();
+}
+
+// Removed before sending: forget the result and cancel the request.
+function discardDraftLinkPreview(href) {
+  draftLinkPreviews.delete(href);
+  linkPreviewResults.delete(href);
+  linkPreviewQueue.delete(href);
+  linkPreviewPending.get(href)?.controller?.abort();
+}
+
+function scheduleLinkPreviewDrain() {
+  if (linkPreviewDrainScheduled) return;
+  linkPreviewDrainScheduled = true;
+  void Promise.resolve().then(() => { linkPreviewDrainScheduled = false; drainLinkPreviews(); });
 }
 
 function readLinkPreviewMode() {
@@ -1941,13 +2047,15 @@ function applyLinkPreviewMode(mode, save = false) {
     catch { /* The visible choice still applies for this page. */ }
   }
   if (linkPreviewMode === "off") { releaseAllLinkPreviews(); resetLinkPreviewRequests(); }
-  for (const node of renderedMessages.values()) updateLinkPreview(node);
+  keepScrollPosition(() => { for (const node of renderedMessages.values()) updateLinkPreview(node); });
+  syncDraftLinkPreviews();
 }
 
+// Availability only affects creating previews for sent links; received previews always show.
 function setLinkPreviewsAvailable(available) {
   linkPreviewsAvailable = available;
   elements.linkPreviewsUnavailable.hidden = available;
-  for (const node of renderedMessages.values()) updateLinkPreview(node);
+  syncDraftLinkPreviews();
 }
 
 function readImagePreviewMode() {
@@ -2865,6 +2973,10 @@ elements.activationForm.addEventListener("submit", async (event) => {
   }
 });
 
+elements.messageInput.addEventListener("input", event => {
+  syncDraftLinkPreviews({ immediate: ["insertFromPaste", "insertFromDrop"].includes(event.inputType) });
+});
+
 elements.messageInput.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || event.shiftKey || event.isComposing
       || event.ctrlKey || event.altKey || event.metaKey) return;
@@ -3055,8 +3167,8 @@ async function recoverMessageStatuses() {
 }
 
 function payloadEntry(payload) {
-  return payload.type === "attachment" || payload.type === "attachment-ref"
-    ? { attachment: payload, text: payload.text || "" } : { text: payload.text };
+  if (payload.type === "attachment" || payload.type === "attachment-ref") return { attachment: payload, text: payload.text || "" };
+  return payload.preview ? { text: payload.text, preview: payload.preview } : { text: payload.text };
 }
 
 function fileIcon() {
@@ -3340,7 +3452,7 @@ elements.messageForm.addEventListener("submit", async (event) => {
       throw new ClientError("This file exceeds the file or group transport limit. Use a smaller file or fewer recipients.");
     }
     const payload = file ? SidewordProtocol.fileReference(file.name, file.type, file.size, `${messageId}.media`, text)
-      : SidewordProtocol.textPayload(text);
+      : textPayloadWithPreview(text, recipients.length);
     const plaintext = SidewordProtocol.encodePayload(payload);
     const envelopes = [];
     let wireBytes = 512;
@@ -3372,6 +3484,9 @@ elements.messageForm.addEventListener("submit", async (event) => {
       });
       // Ownership transfers to the durable outbox even if subsequent history persistence fails.
       if (file) clearAttachment();
+      // A prefetched preview stays tracked until the sent message renders from it; later draft
+      // edits skip addresses that rendered messages use.
+      window.clearTimeout(draftPrefetchTimer);
       elements.messageInput.value = "";
       await storeOutgoing(record);
     });
@@ -3426,6 +3541,7 @@ async function start() {
   if (!window.crypto?.subtle) throw new ClientError("The browser's encryption features are unavailable, so this client cannot create or use chat keys.");
   if (!window.indexedDB) throw new ClientError("The browser's local database is unavailable, so this client cannot save device keys or chat history.");
   identity = await readIdentity();
+  scrubInviteFromUrl();
   const requestedInvite = (elements.inviteToken.value || "").trim();
   invitePending = Boolean(requestedInvite && requestedInvite !== identity?.activeInviteToken);
   if (!invitePending) restoreChatView();
@@ -3441,6 +3557,14 @@ async function start() {
   if (!invitePending && identity?.token) connectSocket();
   window.setInterval(synchronize, POLL_INTERVAL_MS);
   window.setInterval(updateSessionCountdown, 1000);
+}
+
+// The invite credential stays in the server-filled form only: remove it from the address bar
+// and this session-history entry so it is not kept in history, bookmarks or screenshots.
+function scrubInviteFromUrl() {
+  const search = window.location?.search;
+  if (!search || !new URLSearchParams(search).has("invite")) return;
+  history.replaceState(history.state, "", window.location.pathname);
 }
 
 function formatTimeRemaining(milliseconds) {
@@ -3483,7 +3607,7 @@ window.addEventListener("pagehide", () => {
 window.addEventListener("pageshow", (event) => {
   pageActive = true;
   scheduleVisiblePreviews();
-  for (const node of renderedMessages.values()) updateLinkPreview(node);
+  keepScrollPosition(() => { for (const node of renderedMessages.values()) updateLinkPreview(node); });
   if (event.persisted) {
     connectSocket();
     void synchronize();

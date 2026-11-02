@@ -7,6 +7,9 @@ from pathlib import Path
 
 from app.version import __version__
 
+# A release may group its bullets by component when both change.
+SUBSECTIONS = ("### Backend", "### Web")
+
 
 def release_notes(changelog: str, version: str) -> str:
     if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
@@ -24,10 +27,24 @@ def release_notes(changelog: str, version: str) -> str:
     if expected is None:
         raise ValueError("Current release heading must include an ISO date")
     date.fromisoformat(expected[1])
-    bullets = [line for line in body.splitlines() if line.strip()]
-    if not bullets or any(not line.startswith("- ") or not line[2:].strip() for line in bullets):
+    lines = [line for line in body.splitlines() if line.strip()]
+    output: list[str] = []
+    seen: list[str] = []
+    for index, line in enumerate(lines):
+        if line in SUBSECTIONS:
+            # Optional grouping: each subsection once, in order, followed by at least one bullet.
+            following = lines[index + 1] if index + 1 < len(lines) else ""
+            if line in seen or not following.startswith("- ") or (index and not seen):
+                raise ValueError("Release subsections must be unique and contain bullets")
+            seen.append(line)
+            output.extend(([""] if output else []) + [line, ""])
+        elif line.startswith("- ") and line[2:].strip():
+            output.append(line)
+        else:
+            raise ValueError("Current release notes must contain nonempty single-line bullets")
+    if not any(line.startswith("- ") for line in output):
         raise ValueError("Current release notes must contain nonempty single-line bullets")
-    return f"## {heading}\n\n" + "\n".join(bullets) + "\n"
+    return f"## {heading}\n\n" + "\n".join(output) + "\n"
 
 
 def main() -> None:

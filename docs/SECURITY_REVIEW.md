@@ -1,6 +1,6 @@
 # Security review
 
-**Reviewed:** 2026-11-01 · **Backend:** 0.19.0. Maintainer source/test review;
+**Reviewed:** 2026-11-01 · **Backend:** 0.20.0. Maintainer source/test review;
 not an independent security or cryptographic audit. [Report vulnerabilities](../SECURITY.md).
 
 ## Controls and supporting evidence
@@ -14,9 +14,9 @@ not an independent security or cryptographic audit. [Report vulnerabilities](../
 | Attachments | Strict payload/size validation, ciphertext-only relay, gesture-only paste/drop and safe explicit downloads; [client](../tests/client_attachments.test.cjs), [relay](../tests/test_attachments.py) |
 | Previews | Optional click-to-reveal mode, still-image validation, dimension/resource caps, native decode checks, viewer/composer URL cleanup and trust checks before pre-send reads; [formats/lifecycle](../tests/client_media.test.cjs), [integration](../tests/client_media_integration.test.cjs), [policy](PROTOCOL.md#local-image-previews) |
 | Links | HTTP(S)-only DOM anchors, no-referrer new tabs and lookalike warnings; [tests](../tests/client_links.test.cjs), [policy](PROTOCOL.md#links-and-link-previews) |
-| Link previews | Opt-in device setting; isolated fetcher with HTTPS-only, public-address and pinned connections, revalidated redirects, size/time limits and checked images; per-user limits; local re-encoding; [fetcher](../tests/test_link_preview.py), [relay](../tests/test_link_preview_relay.py), [operations](UPGRADING.md#link-preview-service) |
+| Link previews | Opt-in device setting; sender-made previews inside the encrypted payload, so recipients never fetch; strict payload validation; isolated fetcher with HTTPS-only, public-address and pinned connections, revalidated redirects, size/time limits and checked images; per-user limits; local re-encoding; [fetcher](../tests/test_link_preview.py), [relay](../tests/test_link_preview_relay.py), [operations](UPGRADING.md#link-preview-service) |
 | Detached media | Recipient/session-bound reads, inherited expiry, shared queue quotas and separate durable ACKs; [relay](../tests/test_media_transfer.py), [client](../tests/client_transfers.test.cjs) |
-| Capacity/browser | Bounded requests/queues, CSP, text-only rendering, no-store, CSRF and redacted errors; [guards](../app/guards.py), [tests](../tests/test_security_stages.py) |
+| Capacity/browser | Bounded requests/queues, CSP with Trusted Types and framing denial on client and invite pages, text-only rendering, invite tokens removed from the URL on load, no-store, `nosniff` assets, CSRF and redacted errors; [guards](../app/guards.py), [tests](../tests/test_security_stages.py), [delivery](../tests/test_static_delivery.py) |
 | Build/deployment | Exact-image gates, non-root images, recoverable pre-1.0 resets and verified cleanup; [CI](../.github/workflows/test.yml), [deployment tests](../tests/test_deploy.py) |
 
 ## Threat model and limits
@@ -29,7 +29,9 @@ not an independent security or cryptographic audit. [Report vulnerabilities](../
   initial keys, rosters or malicious served code; compromised devices remain a risk.
 - TLS terminators and served code are trusted. Non-exportable keys do not stop same-origin
   malicious code. Bearer theft permits queue deletion/disruption without decryption proof.
-- Preview URLs are visible to the relay and fetcher with the requesting account.
+- Links a sender previews, including unsent drafts, are visible to the relay and fetcher with
+  the sender's account. Preview text and images are sender-controlled; recipients bind them
+  to the message's own link and always show its real host.
 - Names do not unlink identities. Presence/receipts are assertions, not proof of attention.
   Revocation cannot retract sent data. Process limits are not distributed DoS protection.
   See [access lifecycle](SESSION_LIFECYCLE.md) and [operator controls](UPGRADING.md#public-deployment-controls).
@@ -45,7 +47,10 @@ remnants, backup exclusion and retry/restart behavior. Supported backups omit qu
 content/free pages while retaining bounded retry/receipt metadata and credentials.
 This is best-effort deletion, not guaranteed physical erasure; see [backups](UPGRADING.md#backups).
 
-Local history/outboxes remain encrypted. Optional downloads export ordinary local files that
+Local history/outboxes, including link previews, remain encrypted. Session and refresh
+bearer tokens are stored unencrypted in IndexedDB beside the non-exportable keys; same-origin
+script or device access can read them. Encrypting them with a key stored beside them would
+not protect against either; moving refresh credentials to HttpOnly cookies needs an API change. Optional downloads export ordinary local files that
 revocation/deletion cannot erase. Card viewing does not confirm file opening.
 
 ## Prioritized findings and improvements
@@ -58,6 +63,12 @@ revocation/deletion cannot erase. Card viewing does not confirm file opening.
 | F-06 · Low · P2 | Preserve checked image digests and advisory monitoring; dependency ranges/numeric Action tags can resolve differently. |
 
 ## Verification record and gaps
+
+A 2026-11-01 maintainer review of the web client found no HTML or script sinks, fixed-path
+navigation, bounded WebSocket/JSON input and validated local preferences; it added the
+header, invite-URL and viewport-fallback fixes above, moved link previews to the sender and
+made blocked preview destinations indistinguishable from failed fetches. Browser support targets Safari 15.4+,
+Chrome 105+ and Firefox 121+; older engines without `:has()` keep default message widths.
 
 Synthetic Python/Node regressions cover payload boundaries/tampering, peer mismatch,
 authorization, ciphertext persistence, duplicate WS/poll delivery, reload retries,

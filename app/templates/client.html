@@ -12,18 +12,18 @@
   <link rel="preload" href="/static/fonts/IBMPlexSans-SemiBold.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
   <script src="/static/appearance.js?v=2"></script>
-  <link rel="stylesheet" href="/static/client.css?v=38">
-  <script src="/static/client-protocol.js?v=5" defer></script>
+  <link rel="stylesheet" href="/static/client.css?v=43">
+  <script src="/static/client-protocol.js?v=6" defer></script>
   <script src="/static/client-media.js?v=9" defer></script>
   <script src="/static/client-links.js?v=2" defer></script>
-  <script src="/static/client.js?v=55" defer></script>
+  <script src="/static/client.js?v=59" defer></script>
 </head>
 <body class="messenger">
   <a class="skip-link" href="#workspace">Skip to workspace</a>
   <header class="client-header">
     <div class="brand-line">
       <a class="client-brand" href="/client"><img src="/static/mark.svg?v=1" width="28" height="28" alt="">Sideword<span aria-hidden="true"> /</span></a>
-      <span class="test-badge">Test client · unaudited · <span class="app-version">v{{ app_version }}</span></span>
+      <span class="test-badge">Test client · <span class="app-version">v{{ app_version }}</span></span>
     </div>
     <div class="header-controls">
       <span class="connection-label" role="status"><span id="connection-state" class="status-dot" aria-hidden="true"></span><span id="connection-label">Loading</span></span>
@@ -66,7 +66,7 @@
         <button id="reconnect-session" class="button subtle" type="button" hidden>Reconnect saved session</button>
       </form>
       <div class="setup-security">
-        <strong>Testing only · not independently audited</strong>
+        <strong>Testing only</strong>
         <p>Keys stay in this browser and messages are encrypted before upload. Use HTTPS anywhere except localhost.</p>
       </div>
     </section>
@@ -227,12 +227,12 @@
         <legend>Link previews</legend>
         <label><input id="link-previews-off" type="radio" name="link-previews" value="off" checked>Off</label>
         <label><input id="link-previews-on" type="radio" name="link-previews" value="on">On</label>
-        <p id="link-previews-help" class="muted">When on, HTTPS links in opened chats are sent to this server's preview service to load a title and image. Messages stay encrypted; previews are kept only in this tab.</p>
-        <p id="link-previews-unavailable" class="muted">This server does not offer previews.</p>
+        <p id="link-previews-help" class="muted">When on, this server's preview service loads a title and image for HTTPS links you send, starting while you type; the preview is sent encrypted inside your message. Received previews come from their sender and are never fetched. Messages stay encrypted; previews are cached encrypted on this device for up to 7 days and deleted when you turn this off.</p>
+        <p id="link-previews-unavailable" class="muted">This server cannot create previews; received previews still show.</p>
       </fieldset>
       <section aria-labelledby="security-heading">
         <h3 id="security-heading">Security information</h3>
-        <p><strong>Testing only. This client is not independently audited.</strong> Use HTTPS anywhere except localhost.</p>
+        <p><strong>Testing only.</strong> Use HTTPS anywhere except localhost.</p>
         <p>Keys stay in this browser and messages are encrypted before upload. The private key never leaves this browser. Local history is encrypted on this device.</p>
         <p>Compare each full fingerprint with its owner over a separate trusted channel. First-use key pinning is not identity verification. Changed keys block messaging.</p>
         <p class="muted">A local pin detects later key changes, not an initial key substitution. Encryption cannot protect against malicious code delivered by this site's server or a compromised device.</p>

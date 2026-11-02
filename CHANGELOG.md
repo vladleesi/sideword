@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.20.0 — 2026-11-01
+
+### Backend
+
+- Report blocked link-preview destinations like other failed fetches, so the preview service no longer hints at internal DNS records.
+- Apply the client's security headers to invite pages and URL-encode invite tokens in their links.
+- Enforce Trusted Types on client and invite pages, and send `nosniff` with static assets.
+
+### Web
+
+- Move link previews to the sender: the composing client fetches the preview and sends it inside the encrypted message, so recipients never fetch and link owners cannot see when a message is opened; older clients reject preview payloads until reloaded.
+- Prefetch the draft's link once it looks complete; removing it before sending cancels the request, and Send never waits for a preview that is still loading.
+- Remove invite tokens from the address bar and session history when the page loads.
+- Give link previews one fixed card width, narrow text-only messages to about 70 characters per line and cap messages with previews or media at a compact width.
+- Replace the chat image loading spinner with a frame-filling skeleton and fade images in; reduced motion keeps them static.
+- Load stored history with one render instead of one per message.
+- Add classic viewport fallbacks for dynamic viewport sizes, load the current stylesheet on invite pages, and drop the "unaudited" labels from the client and documentation.
+
 ## 0.19.0 — 2026-11-01
 
 - Make HTTP(S) URLs in messages clickable through DOM-built, no-referrer links that open in a new tab; other schemes stay text and encrypted payloads are unchanged.

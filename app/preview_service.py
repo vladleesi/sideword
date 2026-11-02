@@ -22,7 +22,7 @@ from .link_preview import PreviewError, build_preview
 TOKEN_ENV = "SIDEWORD_LINK_PREVIEW_TOKEN"
 MAX_REQUEST_BYTES = 4096
 DEFAULT_CONCURRENCY = 4
-CLIENT_ERRORS = frozenset({"invalid_url", "blocked_destination"})
+CLIENT_ERRORS = frozenset({"invalid_url"})
 HEADERS = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 
 
@@ -58,7 +58,10 @@ def create_preview_app(token: str | None = None, *, builder=build_preview,
         try:
             result = await builder(url)
         except PreviewError as exc:
-            return _error(exc.code, 422 if exc.code in CLIENT_ERRORS else 502)
+            if exc.code in CLIENT_ERRORS:
+                return _error(exc.code, 422)
+            # Blocked DNS answers look like any failed fetch, so callers cannot map internal names.
+            return _error("fetch_failed" if exc.code == "blocked_destination" else exc.code, 502)
         except TimeoutError:
             return _error("timeout", 504)
         except Exception:  # Details may contain the URL; return only a generic code.

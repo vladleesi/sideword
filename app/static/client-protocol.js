@@ -27,6 +27,9 @@ const SidewordProtocol = (() => {
   const MAX_ENVELOPE_BYTES = 2 * 1024 * 1024;
   const MAX_WIRE_CHARS = 4 * Math.ceil(MAX_ENVELOPE_BYTES / 3);
   const MAX_SEND_BYTES = 10 * 1024 * 1024;
+  // Sender-made link previews travel inside the encrypted text payload; recipients never fetch.
+  const MAX_PREVIEW_IMAGE_BYTES = 96 * 1024;
+  const PREVIEW_FIELDS = ["url", "title", "description", "site_name", "final_host", "image"];
 
   function payloadError() {
     return new ProtocolError("Invalid or unsupported message payload. The message was not saved or acknowledged.");
@@ -43,9 +46,42 @@ const SidewordProtocol = (() => {
     return bytes;
   }
 
+  function exactKeys(value, fields) {
+    return value && typeof value === "object" && !Array.isArray(value)
+      && Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
+  }
+
+  // Optional text, bounded; null when absent.
+  function previewText(value, limit) {
+    return value === null || (typeof value === "string" && value.length > 0 && value.length <= limit
+      && !/[\x00-\x1f\x7f]/.test(value));
+  }
+
+  function validatePreview(preview) {
+    if (!exactKeys(preview, PREVIEW_FIELDS) || typeof preview.url !== "string" || preview.url.length > 2048
+        || !previewText(preview.title, 200) || !previewText(preview.description, 400)
+        || !previewText(preview.site_name, 80)
+        || !(preview.final_host === null || (typeof preview.final_host === "string"
+          && /^[a-z0-9.:-]{1,253}$/.test(preview.final_host)))) throw payloadError();
+    let url;
+    try { url = new URL(preview.url); } catch { throw payloadError(); }
+    if (url.protocol !== "https:" || url.href !== preview.url || url.username || url.password) throw payloadError();
+    if (preview.image !== null) {
+      const image = preview.image;
+      if (!exactKeys(image, ["mime", "data"]) || image.mime !== "image/jpeg" || typeof image.data !== "string"
+          || image.data.length > 4 * Math.ceil(MAX_PREVIEW_IMAGE_BYTES / 3)) throw payloadError();
+      let bytes;
+      try { bytes = base64ToBytes(image.data); } catch { throw payloadError(); }
+      if (bytes.length < 4 || bytesToBase64(bytes) !== image.data
+          || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw payloadError();
+    }
+    if (!preview.title && !preview.description && !preview.image) throw payloadError();
+  }
+
   function validatePayload(payload) {
     if (!payload || Array.isArray(payload) || payload.v !== 1) throw payloadError();
-    const fields = payload.type === "text" ? ["v", "type", "text"]
+    const fields = payload.type === "text"
+      ? (Object.hasOwn(payload, "preview") ? ["v", "type", "text", "preview"] : ["v", "type", "text"])
       : payload.type === "attachment" ? ["v", "type", "name", "mime", "size", "data"]
       : payload.type === "attachment-ref" ? ["v", "type", "text", "name", "mime", "size", "media_id"] : [];
     if (Object.keys(payload).length !== fields.length
@@ -55,6 +91,7 @@ const SidewordProtocol = (() => {
           || encoder.encode(payload.text).length > MAX_TEXT_BYTES) {
         throw new ProtocolError("Text messages must contain 1–16,000 UTF-8 bytes.");
       }
+      if (Object.hasOwn(payload, "preview")) validatePreview(payload.preview);
     } else {
       if (typeof payload.name !== "string" || !payload.name.length || payload.name.length > 255
           || typeof payload.mime !== "string" || payload.mime.length > 127
@@ -78,7 +115,9 @@ const SidewordProtocol = (() => {
     return validatePayload(payload);
   }
 
-  function textPayload(text) { return validatePayload({ v: 1, type: "text", text }); }
+  function textPayload(text, preview = null) {
+    return validatePayload(preview ? { v: 1, type: "text", text, preview } : { v: 1, type: "text", text });
+  }
 
   function filePayload(name, mime, bytes) {
     if (bytes.byteLength > MAX_FILE_BYTES) throw new ProtocolError("Files must be 1 MiB or smaller.");
@@ -235,5 +274,5 @@ const SidewordProtocol = (() => {
   return Object.freeze({ bytesToBase64, base64ToBytes, encryptForRecipient,
     decryptMessage, publicKeyFingerprint, ProtocolError, encodePayload, decodePayload,
     textPayload, filePayload, fileReference, validatePayload, attachmentBytes, safeDownloadName,
-    attachmentSendBytes, MAX_FILE_BYTES, MAX_SEND_BYTES, MAX_WIRE_CHARS });
+    attachmentSendBytes, MAX_FILE_BYTES, MAX_SEND_BYTES, MAX_WIRE_CHARS, MAX_PREVIEW_IMAGE_BYTES });
 })();

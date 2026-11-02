@@ -112,14 +112,16 @@ test('renders links as DOM anchors without interpreting HTML in message text', (
   assert.equal(app.run('apiCalls.length'), 0);
 });
 
-// Waits for queued previews, API stubs and local image work to settle.
+// Sender-made previews: drafts fetch through the server; rendering uses only the message.
 async function flush() {
   for (let index = 0; index < 30; index++) await new Promise(resolve => setImmediate(resolve));
 }
 
+const JPEG = fs.readFileSync('tests/fixtures/media/valid.jpg');
+const PNG = fs.readFileSync('tests/fixtures/media/valid.png');
+
 function previewClient({ available = true, mode = 'on', reply, wide = false } = {}) {
   const app = linkClient();
-  const png = fs.readFileSync('tests/fixtures/media/valid.png');
   app.run(`globalThis.created = []; globalThis.revoked = []; globalThis.reduced = []; globalThis.persisted = 0;
     globalThis.stored = new Map(); window.localStorage = {
       getItem: key => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value) };
@@ -129,15 +131,15 @@ function previewClient({ available = true, mode = 'on', reply, wide = false } = 
       static createObjectURL(blob) { created.push(blob); return 'blob:local-' + created.length; }
       static revokeObjectURL(url) { revoked.push(url); } };
     globalThis.SidewordMedia = { ...SidewordMedia,
-      inspect: ${wide} ? () => ({ mime: 'image/png', width: 1200, height: 630 }) : SidewordMedia.inspect,
+      inspect: ${wide} ? () => ({ mime: 'image/jpeg', width: 1200, height: 630 }) : SidewordMedia.inspect,
       reduceImage: async (...args) => {
         reduced.push(args.slice(2).filter(value => typeof value !== 'function'));
-        return args[3]() ? new Uint8Array([255, 216, 255]) : null; } };
-    linkPreviewMode = ${JSON.stringify(mode)}; setLinkPreviewsAvailable(${available});`);
-  const response = reply || {
-    title: '<img src=x onerror=alert(1)>', description: 'About <b>this</b>', site_name: 'Example Docs',
-    url: null, final_host: 'www.example.org',
-    image: { mime: 'image/png', width: 2, height: 2, data: png.toString('base64') } };
+        return args[3]() ? new Uint8Array(jpegBytes) : null; } };
+    linkPreviewMode = ${JSON.stringify(mode)}; setLinkPreviewsAvailable(${available});`.replace('jpegBytes',
+    JSON.stringify([...JPEG])));
+  const response = reply || { title: '<img src=x onerror=alert(1)>', description: 'About <b>this</b>',
+    site_name: 'Example Docs', url: null, final_host: 'www.example.org',
+    image: { mime: 'image/png', width: 2, height: 2, data: PNG.toString('base64') } };
   app.run('value => { globalThis.previewReply = value; }')(response);
   app.run(`api = async (path, options) => {
     apiCalls.push([path, options?.method, options?.body]);
@@ -147,40 +149,28 @@ function previewClient({ available = true, mode = 'on', reply, wide = false } = 
   return app;
 }
 
-function renderLink(app, text = 'see https://example.com/a', id = 'x', kind = 'theirs') {
-  app.run(`messagesByChat.set(7, [...(messagesByChat.get(7) || []), {id: ${JSON.stringify(id)}, kind: ${JSON.stringify(kind)},
-    senderPublicId: 'peer-a', text: ${JSON.stringify(text)}, createdAt: ${Date.now()}}]); renderMessages();`);
+const calls = app => JSON.parse(JSON.stringify(app.run('apiCalls')));
+const senderPreview = (overrides = {}) => ({ url: 'https://example.com/a', title: '<img src=x onerror=alert(1)>',
+  description: 'About <b>this</b>', site_name: 'Example Docs', final_host: 'www.example.org',
+  image: { mime: 'image/jpeg', data: JPEG.toString('base64') }, ...overrides });
+
+function renderLink(app, text = 'see https://example.com/a', id = 'x', kind = 'theirs', preview = undefined) {
+  app.run('value => { globalThis.nextEntry = value; }')({ id, kind, senderPublicId: 'peer-a', text,
+    createdAt: Date.now(), ...(preview ? { preview } : {}) });
+  app.run(`messagesByChat.set(7, [...(messagesByChat.get(7) || []), nextEntry]); renderMessages();`);
   return app.nodes.get('#message-list').children.find(row => row.messageEntry.id === id);
 }
-const calls = app => JSON.parse(JSON.stringify(app.run('apiCalls')));
 
-test('previews are off by default: no requests, cards or placeholders under links', async () => {
-  const app = previewClient({ mode: undefined });
-  app.run('linkPreviewMode = readLinkPreviewMode()');
-  assert.equal(app.run('linkPreviewMode'), 'off');
-  const row = renderLink(app);
-  await flush();
-  assert.equal(row.linkCard, undefined);
-  assert.deepEqual(row.messageBubble.children, [row.messageContent]);
+function typeDraft(app, value, inputType = 'insertText') {
+  const input = app.nodes.get('#message-input');
+  input.value = value;
+  input.emit('input', { inputType });
+}
+
+test('received previews render from the message with no network request, even without server support', () => {
+  const app = previewClient({ available: false });
+  const row = renderLink(app, 'see https://example.com/a', 'x', 'theirs', senderPreview());
   assert.equal(calls(app).length, 0);
-});
-
-test('suspicious links show an inline warning without a card', async () => {
-  const app = previewClient({ mode: 'off' });
-  const row = renderLink(app, 'login at https://pаypal.com/login now');
-  assert.equal(row.linkWarning.textContent, 'Check xn--pypal-4ve.com: Mixes writing systems');
-  assert.equal(row.messageBubble.attributes.get('has-link-extras'), true);
-  assert.equal(row.linkCard, undefined);
-  assert.equal(anchorsOf(row.messageContent)[0].attributes.get('aria-describedby'),
-    'external-link-note suspicious-link-note');
-});
-
-test('when on, previews load automatically into a compact card with safe text', async () => {
-  const app = previewClient();
-  const row = renderLink(app);
-  assert.equal(row.linkCard, undefined); // Nothing renders until the preview arrives.
-  await flush();
-  assert.deepEqual(calls(app), [['/api/v1/link-previews', 'POST', '{"url":"https://example.com/a"}']]);
   const card = row.linkCard;
   assert.equal(card.tagName, 'a');
   assert.equal(card.href, 'https://example.com/a');
@@ -193,171 +183,217 @@ test('when on, previews load automatically into a compact card with safe text', 
     ['link-card-title', '<img src=x onerror=alert(1)>'], ['link-card-description', 'About <b>this</b>']]);
   assert.equal(thumbnail.className, 'link-card-thumbnail');
   assert.equal(thumbnail.src, 'blob:local-1');
-  assert.equal(thumbnail.alt, '');
   assert.equal(app.run('created[0].type'), 'image/jpeg');
-  assert.deepEqual(JSON.parse(JSON.stringify(app.run('reduced'))), [[24576, 160]]);
-  assert.equal(row.messageBubble.attributes.get('has-link-extras'), true);
-  // Nothing is added to encrypted history or the message entry.
-  assert.equal(app.run('persisted'), 0);
-  assert.deepEqual(Object.keys(app.run('messagesByChat.get(7)[0]')).sort(),
-    ['createdAt', 'id', 'kind', 'senderPublicId', 'text']);
-  // The same address elsewhere reuses the in-memory result.
-  const again = renderLink(app, 'again https://example.com/a', 'y');
-  await flush();
-  assert.equal(again.linkCard.children[0].children[0].children[1].textContent, '<img src=x onerror=alert(1)>');
-  assert.equal(calls(app).length, 1);
 });
 
-test('wide images become a banner and titles that repeat the description are shortened', async () => {
-  const app = previewClient({ wide: true, reply: { title: 'GitHub - owner/repo: A lightweight backend for chats',
-    description: 'A lightweight backend for chats. - owner/repo', site_name: 'GitHub', final_host: 'github.com',
-    image: { mime: 'image/png', data: fs.readFileSync('tests/fixtures/media/valid.png').toString('base64') } } });
-  const row = renderLink(app, 'https://github.com/owner/repo');
-  await flush();
+test('a preview must describe the first previewable link, and unusable images are dropped', () => {
+  const app = previewClient();
+  const other = renderLink(app, 'see https://example.com/a', 'o', 'theirs', senderPreview({ url: 'https://evil.example/' }));
+  assert.equal(other.linkCard, undefined);
+  const http = renderLink(app, 'see http://example.com/a', 'h', 'theirs', senderPreview({ url: 'http://example.com/a' }));
+  assert.equal(http.linkCard, undefined);
+  const broken = renderLink(app, 'https://example.com/a', 'b', 'theirs',
+    senderPreview({ image: { mime: 'image/jpeg', data: Buffer.from('not a jpeg').toString('base64') } }));
+  assert.equal(broken.linkCard.children[0].children.length, 1); // Text only, no image.
+  assert.equal(app.run('created.length'), 0);
+  const plain = renderLink(app, 'see https://example.com/a', 'p');
+  assert.equal(plain.linkCard, undefined);
+  assert.deepEqual(plain.messageBubble.children, [plain.messageContent]);
+});
+
+test('wide preview images become a banner', () => {
+  const app = previewClient({ wide: true });
+  const row = renderLink(app, 'https://example.com/a', 'w', 'theirs', senderPreview());
   const [banner, body] = row.linkCard.children;
   assert.equal(banner.className, 'link-card-banner');
-  assert.deepEqual(JSON.parse(JSON.stringify(app.run('reduced'))), [[98304, 640]]);
-  assert.deepEqual(body.children[0].children.map(node => [node.className, node.textContent]), [
-    ['link-card-source', 'github.com'], ['link-card-title', 'GitHub - owner/repo'],
-    ['link-card-description', 'A lightweight backend for chats. - owner/repo']]);
+  assert.equal(body.children.length, 1);
 });
 
-test('a title that starts with the description is shown once', async () => {
-  const app = previewClient({ reply: { title: 'Same words here and more', description: 'Same words here' } });
-  const row = renderLink(app);
-  await flush();
-  assert.deepEqual(row.linkCard.children[0].children[0].children.map(node => node.className),
-    ['link-card-source', 'link-card-title']);
-});
-
-test('only previewable HTTPS links on supporting servers are requested', async () => {
-  const unavailable = previewClient({ available: false });
-  renderLink(unavailable);
-  await flush();
-  assert.equal(calls(unavailable).length, 0);
-  assert.equal(unavailable.nodes.get('#link-previews-unavailable').hidden, false);
+test('previews are off by default; turning them off hides cards and releases images', () => {
+  const off = previewClient({ mode: undefined });
+  off.run('linkPreviewMode = readLinkPreviewMode()');
+  assert.equal(off.run('linkPreviewMode'), 'off');
+  const hidden = renderLink(off, 'https://example.com/a', 'x', 'theirs', senderPreview());
+  assert.equal(hidden.linkCard, undefined);
   const app = previewClient();
-  for (const [id, text] of [['h', 'http://example.com/'], ['c', 'https://user@example.com/'],
-    ['p', 'https://example.com:8443/']]) renderLink(app, text, id);
-  app.run(`messagesByChat.set(7, [...messagesByChat.get(7), {id: 'f', kind: 'theirs', senderPublicId: 'peer-a',
-    text: 'https://example.com/file', createdAt: 5, attachment: {type: 'attachment-ref', mime: 'application/pdf', size: 1}}]);
-    renderMessages();`);
-  await flush();
-  assert.equal(calls(app).length, 0);
-});
-
-test('failures render nothing, are remembered, and rate limits retry later', async () => {
-  const app = previewClient();
-  app.run('previewReply = new ClientError("Chat request failed (HTTP 502). Unavailable")');
-  const row = renderLink(app);
-  await flush();
-  assert.equal(row.linkCard, undefined);
-  assert.deepEqual(row.messageBubble.children, [row.messageContent]);
-  renderLink(app, 'again https://example.com/a', 'y');
-  await flush();
-  assert.equal(calls(app).length, 1);
-  const limited = previewClient();
-  limited.run(`globalThis.attempts = 0; previewReply = () => ++attempts === 1
-    ? new ClientError("Chat request failed (HTTP 429). Slow down") : { title: 'Later' };`);
-  const later = renderLink(limited);
-  await flush();
-  assert.equal(later.linkCard, undefined);
-  const retry = limited.timers.findLast(timer => timer.delay === 10000);
-  retry();
-  await flush();
-  assert.equal(later.linkCard.children[0].children[0].children[1].textContent, 'Later');
-});
-
-test('loading is parallel but bounded, newest first, with one request per address', async () => {
-  const app = previewClient();
-  app.run(`globalThis.release = []; previewReply = options => new Promise(resolve =>
-    release.push(() => resolve({ title: JSON.parse(options.body).url })));`);
-  app.run(`messagesByChat.set(7, [1, 2, 3, 4, 5].map(index => ({id: 'm' + index, kind: 'theirs',
-    senderPublicId: 'peer-a', text: 'https://e' + index + '.example/', createdAt: index}))); renderMessages();`);
-  await flush();
-  assert.deepEqual(calls(app).map(call => JSON.parse(call[2]).url),
-    ['https://e5.example/', 'https://e4.example/', 'https://e3.example/']);
-  const duplicate = renderLink(app, 'same https://e5.example/', 'dup');
-  app.run('release.splice(0).forEach(resolve => resolve())');
-  await flush();
-  assert.equal(duplicate.linkCard.children[0].children[0].children[1].textContent, 'https://e5.example/');
-  assert.equal(calls(app).length, 5);
-  app.run('release.splice(0).forEach(resolve => resolve())');
-  await flush();
-  const rows = app.nodes.get('#message-list').children;
-  assert.ok(rows.every(row => row.linkCard));
-  assert.equal(calls(app).length, 5);
-});
-
-test('turning previews off removes cards, revokes images and ignores late responses', async () => {
-  const app = previewClient();
-  const row = renderLink(app);
-  await flush();
-  assert.ok(row.linkCard);
+  const row = renderLink(app, 'https://example.com/a', 'x', 'theirs', senderPreview());
   app.nodes.get('#link-previews-off').checked = true;
   app.nodes.get('#link-previews-off').emit('change');
   assert.equal(app.run('stored.get(LINK_PREVIEW_KEY)'), 'off');
   assert.equal(row.linkCard, null);
   assert.deepEqual([...app.run('revoked')], ['blob:local-1']);
-  assert.equal(app.run('linkPreviewResults.size'), 0);
-  app.run(`globalThis.release = []; previewReply = () => new Promise(resolve => release.push(resolve));`);
-  app.run('applyLinkPreviewMode("on", true)');
-  await flush();
-  app.run('applyLinkPreviewMode("off")');
-  app.run('release.forEach(resolve => resolve({ title: "Late" }))');
-  await flush();
-  assert.equal(row.linkCard, null);
-  app.run('stored.set(LINK_PREVIEW_KEY, "on")');
+  app.run('applyLinkPreviewMode("on")');
+  assert.ok(row.linkCard);
+  app.run('stored.set(LINK_PREVIEW_KEY, "off")');
   app.windowEvents.get('storage')({ key: 'sideword-client-link-previews' });
-  assert.equal(app.nodes.get('#link-previews-on').checked, true);
-});
-
-test('page hide releases images and page show restores cached previews', async () => {
-  const app = previewClient();
-  const row = renderLink(app);
-  await flush();
-  app.windowEvents.get('pagehide')();
   assert.equal(row.linkCard, null);
-  assert.deepEqual([...app.run('revoked')], ['blob:local-1']);
-  app.windowEvents.get('pageshow')({ persisted: false });
-  assert.equal(row.linkCard.children[0].children[1].src, 'blob:local-2');
-  assert.equal(calls(app).length, 1);
 });
 
-test('own messages keep status and details; cards and links never open details', async () => {
+test('a completed draft URL is prefetched once, and deleting it cancels the request and drops the result', async () => {
+  const app = previewClient();
+  typeDraft(app, 'see https://example.com/a');
+  await flush();
+  assert.equal(calls(app).length, 0); // Still possibly being typed.
+  app.timers.findLast(timer => timer.delay === 700)();
+  await flush();
+  assert.deepEqual(calls(app), [['/api/v1/link-previews', 'POST', '{"url":"https://example.com/a"}']]);
+  typeDraft(app, 'see https://example.com/a and more');
+  await flush();
+  assert.equal(calls(app).length, 1);
+  typeDraft(app, 'see nothing');
+  assert.equal(app.run('linkPreviewResults.size'), 0);
+  app.run(`globalThis.aborted = 0; previewReply = options => new Promise((resolve, reject) => {
+    options.signal.addEventListener('abort', () => { aborted++; reject(new Error('aborted')); }); });`);
+  typeDraft(app, 'https://example.com/slow', 'insertFromPaste');
+  await flush();
+  typeDraft(app, 'changed my mind');
+  await flush();
+  assert.equal(app.run('aborted'), 1);
+  assert.equal(app.run('linkPreviewPending.size'), 0);
+  const off = previewClient({ mode: 'off' });
+  typeDraft(off, 'https://example.com/a ', 'insertFromPaste');
+  await flush();
+  assert.equal(calls(off).length, 0);
+});
+
+test('sending puts the ready preview into the encrypted payload; large groups omit the image', async () => {
+  const app = previewClient();
+  typeDraft(app, 'see https://example.com/a ', 'insertFromPaste');
+  await flush();
+  const preview = app.run('sendLinkPreview("see https://example.com/a", 1)');
+  assert.deepEqual(Object.keys(preview).sort(), ['description', 'final_host', 'image', 'site_name', 'title', 'url']);
+  assert.equal(preview.url, 'https://example.com/a');
+  assert.equal(preview.image.mime, 'image/jpeg');
+  assert.deepEqual(JSON.parse(JSON.stringify(app.run('reduced'))), [[24576, 160]]);
+  const payload = app.run('value => SidewordProtocol.textPayload("see https://example.com/a", value)')(preview);
+  assert.equal(payload.preview.title, '<img src=x onerror=alert(1)>');
+  const entry = app.run('value => payloadEntry(value)')(payload);
+  assert.equal(entry.preview.url, 'https://example.com/a');
+  // A realistic 60 KB thumbnail fits a few copies but not the 100-recipient maximum.
+  app.run('linkPreviewResults.get("https://example.com/a").image.bytes = new Uint8Array(60000).fill(1)');
+  assert.ok(app.run('sendLinkPreview("see https://example.com/a", 3)').image);
+  const group = app.run('sendLinkPreview("see https://example.com/a", 100)');
+  assert.equal(group.image, null);
+  assert.equal(group.title, '<img src=x onerror=alert(1)>');
+  assert.equal(app.run('sendLinkPreview("no links here", 1)'), null);
+});
+
+test('send never waits for a preview and never starts a request', async () => {
+  const app = previewClient();
+  app.run(`previewReply = () => new Promise(() => {});`);
+  // Nothing loaded yet: the message goes out at once without a preview or a new request.
+  assert.equal(app.run('sendLinkPreview("https://example.com/new", 1)'), null);
+  await flush();
+  assert.equal(calls(app).length, 0);
+  // A draft request still in flight is not awaited either.
+  typeDraft(app, 'https://example.com/slow ', 'insertFromPaste');
+  await flush();
+  assert.equal(calls(app).length, 1);
+  const payload = app.run('textPayloadWithPreview("https://example.com/slow", 1)');
+  assert.deepEqual(Object.keys(payload), ['v', 'type', 'text']);
+});
+
+test('draft rate limits retry later', async () => {
+  const app = previewClient();
+  app.run(`globalThis.attempts = 0; previewReply = () => ++attempts === 1
+    ? new ClientError("Chat request failed (HTTP 429). Slow down") : { title: 'Later' };`);
+  typeDraft(app, 'https://example.com/a ', 'insertFromPaste');
+  await flush();
+  assert.equal(app.run('linkPreviewResults.size'), 0);
+  app.timers.findLast(timer => timer.delay === 10000)();
+  await flush();
+  assert.equal(app.run('linkPreviewResults.get("https://example.com/a").title'), 'Later');
+});
+
+test('own messages keep status and details; cards and links never open details', () => {
   const app = previewClient();
   app.run('globalThis.detailsOpened = 0; showMessageDetails = () => { detailsOpened++; };');
-  const row = renderLink(app, 'read https://example.com/a', 'x', 'mine');
-  await flush();
+  const row = renderLink(app, 'read https://example.com/a', 'x', 'mine', senderPreview());
   assert.equal(row.messageBubble.children.at(-1), row.messageFooter);
   row.emit('click', { target: anchorsOf(row.messageContent)[0] });
   row.emit('click', { target: row.linkCard.children[0].children[0].children[1] });
   assert.equal(app.run('detailsOpened'), 0);
   row.emit('click', { target: row.messageContent });
   assert.equal(app.run('detailsOpened'), 1);
-  app.run(`messagesByChat.get(7)[0].text = 'edited https://example.org/b'; renderMessages();`);
-  await flush();
-  assert.equal(anchorsOf(row.messageContent)[0].href, 'https://example.org/b');
-  assert.equal(row.linkCard.href, 'https://example.org/b');
-  assert.equal(row.messageBubble.children.filter(child => child.className?.includes('link-card')).length, 1);
-  assert.equal(row.messageBubble.children.at(-1), row.messageFooter);
+  assert.equal(row.messageBubble.attributes.get('has-link-extras'), true);
+  assert.equal(calls(app).length, 0);
 });
 
-test('plain, system and attachment messages keep their existing rendering', () => {
+test('page hide releases preview images and page show restores them without requests', () => {
+  const app = previewClient();
+  const row = renderLink(app, 'https://example.com/a', 'x', 'theirs', senderPreview());
+  app.windowEvents.get('pagehide')();
+  assert.equal(row.linkCard, null);
+  assert.deepEqual([...app.run('revoked')], ['blob:local-1']);
+  app.windowEvents.get('pageshow')({ persisted: false });
+  assert.equal(row.linkCard.children[0].children[1].src, 'blob:local-2');
+  assert.equal(calls(app).length, 0);
+});
+
+test('stored history loads with one render instead of one per message', async () => {
+  const app = previewClient({ mode: 'off' });
+  await app.run(`(async () => {
+    identity.storageKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    globalThis.database = new Map();
+    readHistoryRecords = async prefix => [...database]
+      .filter(([key]) => key.startsWith(prefix || HISTORY_PREFIX + identity.publicId + ':'))
+      .map(([key, value]) => ({ key, value }));
+    messagesByChat.set(7, []); loadedHistoryKeys.clear(); renderMessages();
+    for (let index = 0; index < 5; index++) {
+      const key = historyKey(7, 'h' + index);
+      database.set(key, await sealLocalRecord(key, { id: 'h' + index, kind: 'theirs', senderPublicId: 'peer-a',
+        text: 'stored ' + index, createdAt: 1000 + index }));
+    }
+    globalThis.renders = 0;
+    const original = renderMessages;
+    renderMessages = (...args) => { renders++; return original(...args); };
+    await loadStoredHistory();
+  })()`);
+  assert.equal(app.run('renders'), 1);
+  assert.deepEqual(app.nodes.get('#message-list').children.map(row => row.messageContent.textContent),
+    ['stored 0', 'stored 1', 'stored 2', 'stored 3', 'stored 4']);
+});
+
+test('text payload previews are strictly validated', () => {
   const app = linkClient();
-  app.run(`messagesByChat.set(7, [
-    {id: 'a', kind: 'theirs', senderPublicId: 'peer-a', text: 'plain  text\\n  kept', createdAt: 1000},
-    {id: 'b', kind: 'system', text: 'Notice https://example.com', createdAt: 2000},
-    {id: 'c', kind: 'theirs', senderPublicId: 'peer-a', text: 'caption https://example.com', createdAt: 3000,
-      attachment: {type: 'attachment-ref', mime: 'application/pdf', size: 10, text: 'caption https://example.com'}},
-    {id: 'd', kind: 'theirs', senderPublicId: 'peer-a', text: '', createdAt: 4000},
-  ]); renderMessages();`);
-  const [plain, system, attachment, empty] = app.nodes.get('#message-list').children;
-  assert.equal(plain.messageContent.text, 'plain  text\n  kept');
-  assert.equal(plain.messageContent.children.length, 0);
-  assert.equal(plain.linkCard, undefined);
-  assert.equal(system.messageContent.text, 'Notice https://example.com');
-  assert.equal(anchorsOf(system.messageContent).length, 0);
-  assert.equal(anchorsOf(attachment.messageContent).length, 1);
-  assert.equal(empty.messageContent.textContent, '');
+  const valid = senderPreview();
+  const check = preview => {
+    try { app.run('value => SidewordProtocol.textPayload("https://example.com/a", value)')(preview); return true; }
+    catch { return false; }
+  };
+  assert.equal(check(valid), true);
+  assert.equal(check({ ...valid, image: null }), true);
+  for (const [name, preview] of [
+    ['extra key', { ...valid, extra: 1 }],
+    ['missing key', (({ title, ...rest }) => rest)(valid)],
+    ['http url', { ...valid, url: 'http://example.com/a' }],
+    ['unnormalized url', { ...valid, url: 'https://EXAMPLE.com/a' }],
+    ['credentials', { ...valid, url: 'https://user@example.com/a' }],
+    ['script url', { ...valid, url: 'javascript:alert(1)' }],
+    ['control characters', { ...valid, title: 'a\u0007b' }],
+    ['long title', { ...valid, title: 'x'.repeat(201) }],
+    ['bad host', { ...valid, final_host: 'evil.com/<x>' }],
+    ['empty', { ...valid, title: null, description: null, image: null }],
+    ['png image', { ...valid, image: { mime: 'image/jpeg', data: PNG.toString('base64') } }],
+    ['svg mime', { ...valid, image: { mime: 'image/svg+xml', data: JPEG.toString('base64') } }],
+    ['image extra key', { ...valid, image: { mime: 'image/jpeg', data: JPEG.toString('base64'), url: 'x' } }],
+    ['oversized image', { ...valid, image: { mime: 'image/jpeg',
+      data: Buffer.concat([JPEG, Buffer.alloc(100 * 1024)]).toString('base64') } }],
+  ]) assert.equal(check(preview), false, name);
+  // Attachments carry no previews, and plain text payloads are unchanged.
+  assert.throws(() => app.run('SidewordProtocol.validatePayload')({ v: 1, type: 'attachment-ref', text: '', name: 'a',
+    mime: 'text/plain', size: 1, media_id: 'x.media', preview: valid }));
+  assert.deepEqual(Object.keys(app.run('SidewordProtocol.textPayload("hello")')), ['v', 'type', 'text']);
+});
+
+test('an unusable preview never blocks sending', async () => {
+  const app = previewClient({ reply: { title: 'bad\u0007title' } });
+  typeDraft(app, 'https://example.com/a ', 'insertFromPaste');
+  await flush();
+  const payload = app.run('textPayloadWithPreview("https://example.com/a", 1)');
+  assert.deepEqual(Object.keys(payload), ['v', 'type', 'text']);
+  const good = previewClient();
+  typeDraft(good, 'https://example.com/a ', 'insertFromPaste');
+  await flush();
+  assert.equal(good.run('textPayloadWithPreview("https://example.com/a", 1)').preview.url, 'https://example.com/a');
 });

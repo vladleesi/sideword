@@ -51,6 +51,7 @@ class PublicStaticFiles(StaticFiles):
             # because older/unversioned URLs can still resolve to updated files.
             response.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
             response.headers["X-Accel-Buffering"] = "yes"
+            response.headers["X-Content-Type-Options"] = "nosniff"
             if response.status_code == 304:
                 response.headers.add_vary_header("Accept-Encoding")
         return response

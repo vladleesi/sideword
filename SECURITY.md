@@ -11,6 +11,7 @@ Initial acknowledgement is expected within seven days; resolution depends on sev
 
 ## Security limits
 
-The browser client is unaudited. V1 has no recipient forward secrecy or post-compromise
-recovery; first-use pins cannot authenticate initial keys or malicious served code.
+The browser client has not had an independent security audit. V1 has no recipient forward
+secrecy or post-compromise recovery; first-use pins cannot authenticate initial keys or
+malicious served code.
 Read the [security review](docs/SECURITY_REVIEW.md) and [protocol](docs/PROTOCOL.md).

@@ -26,6 +26,7 @@ def test_public_assets_are_cacheable_and_buffered(client, path):
     response = client.get(path, headers={"Accept-Encoding": "identity"})
     assert response.status_code == 200
     assert response.headers["cache-control"] == CACHE
+    assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-accel-buffering"] == "yes"
     assert "immutable" not in response.headers["cache-control"]
     assert "set-cookie" not in response.headers
@@ -93,8 +94,13 @@ def test_private_responses_and_errors_never_use_public_asset_policy(client, path
     assert response.headers["referrer-policy"] == "no-referrer"
     assert "x-accel-buffering" not in response.headers
     assert "content-encoding" not in response.headers
-    if path.startswith("/client"):
-        assert "default-src 'none'" in response.headers["content-security-policy"]
+    if path.startswith(("/client", "/l/")):
+        policy = response.headers["content-security-policy"]
+        assert "default-src 'none'" in policy and "frame-ancestors 'none'" in policy
+        assert "require-trusted-types-for 'script'; trusted-types 'none'" in policy
+        assert response.headers["x-frame-options"] == "DENY"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert response.headers["cross-origin-opener-policy"] == "same-origin"
 
 
 def test_static_validation_errors_are_not_cacheable(client):

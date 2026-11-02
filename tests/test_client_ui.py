@@ -87,7 +87,7 @@ def test_client_retains_controls_accessibility_and_separate_mobile_views():
         assert icons[0]["attrs"]["aria-hidden"] == "true"
         assert icons[0]["attrs"]["focusable"] == "false"
     assert tree.by_id("back-to-chats")["attrs"]["aria-label"] == "Back to conversations"
-    assert "Test client · unaudited" in html
+    assert "Test client · " in html and "unaudited" not in html
     assert "hidden" in tree.by_id("setup-panel")["attrs"]
     assert "hidden" not in tree.by_id("loading-panel")["attrs"]
     assert tree.by_id("loading-panel")["attrs"]["role"] == "status"
@@ -222,12 +222,17 @@ def test_invite_states_use_client_theme_and_preserve_status_messages(status, exp
     assert "client.css" in html
     assert "admin.css" not in html
     assert html.index("appearance.js") < html.index("client.css")
-    assert "Test client · unaudited" in html
+    assert "Test client · " in html and "unaudited" not in html
     assert len([node for node in Structure(html).nodes
                 if node["attrs"].get("name") == "appearance"]) == 3
     if action:
         assert action in html
         assert 'href="/client?invite=example-invite"' in html
+        # Tokens are URL-encoded, so characters such as & or # cannot alter the query.
+        tricky = templates.env.get_template("landing.html").render(
+            request=request, token="a&b#c", status=status,
+            details={"is_personal": True, "password_required": True})
+        assert 'href="/client?invite=a%26b%23c"' in tricky
     else:
         assert 'href="/client?invite=' not in html
     if status == "active":
@@ -274,7 +279,8 @@ def test_editorial_message_layout_uses_compact_bubbles_and_integrated_svg_indica
     assert ".message-sender { min-width: 0; font-size: .675rem;" in css
     assert (".message-header time, .message-separator { flex-shrink: 0; "
             "color: var(--muted); font-size: .675rem;") in css
-    assert "width: fit-content" in css and "max-width: min(88%, 38rem)" in css
+    assert "width: fit-content" in css and "max-width: min(84%, 34rem)" in css
+    assert ".message:has(.attachment-card, .link-card) { max-width: min(84%, 24rem); }" in css
     assert ".message-content { display: inline; white-space: pre-wrap" in css
     assert ".message-bubble { position: relative; width: fit-content; min-width: 0;" in css
     assert '.message.mine .message-content::after { content: ""; display: inline-block;' in css
@@ -325,9 +331,37 @@ def test_admin_pages_show_the_backend_version_in_the_top_bar():
 
 def test_preview_and_media_cards_fill_wide_bubbles_without_widening_them():
     css = (ROOT / "app/static/client.css").read_text()
-    # Each card contributes a default width, then stretches to text wider than it.
-    assert ".link-card { display: block; width: 20rem; min-width: 100%; max-width: 100%;" in css
+    # Link previews keep one width; the bubble matches it and text wraps inside.
+    assert ".link-card { display: block; width: 20rem; max-width: 100%;" in css
+    assert ".message-bubble:has(> .link-card) { width: calc(20rem + 1.3rem); }" in css
     assert "width: fit-content; min-width: 16.5rem; max-width: 100%;" in css
     assert "min-height: 0; width: 0; min-width: 100%;" in css
     assert "-webkit-line-clamp: 3; line-clamp: 3;" in css
     assert "-webkit-line-clamp: 4; line-clamp: 4;" in css
+
+
+def test_image_previews_use_a_frame_filling_skeleton_with_reduced_motion_support():
+    css = (ROOT / "app/static/client.css").read_text()
+    assert (".media-preview > .media-loading { position: relative; align-self: stretch; "
+            "flex: 1;") in css
+    assert "animation: media-pulse 1.6s ease-in-out infinite;" in css
+    assert ".media-image { animation: media-fade-in .25s ease-out; }" in css
+    assert ("@media (prefers-reduced-motion: reduce) { .media-preview > .media-loading::before, "
+            ".media-image {") in css
+    # The glyph is an inline data image, which the client CSP already allows for images.
+    assert 'mask: url("data:image/svg+xml,' in css
+
+
+def test_client_pages_share_the_current_stylesheet_and_viewport_fallbacks():
+    import re
+    client_html = (ROOT / "app/templates/client.html").read_text()
+    landing_html = (ROOT / "app/templates/landing.html").read_text()
+    revision = re.search(r"client\.css\?v=(\d+)", client_html)[1]
+    assert f"client.css?v={revision}" in landing_html
+    css = (ROOT / "app/static/client.css").read_text()
+    # Every dynamic-viewport size has a classic viewport fallback for older engines.
+    for line in css.splitlines():
+        for match in re.finditer(r"([a-z-]+):\s*([^;{}]*\d+dvh[^;{}]*);", line):
+            earlier = re.findall(rf"(?:^|[;{{\s]){re.escape(match[1])}:\s*([^;{{}}]*);",
+                                 line[:match.start()])
+            assert any(re.search(r"\d+vh\b", value) for value in earlier), line

@@ -451,7 +451,8 @@ def test_service_bounds_requests_concurrency_and_maps_errors():
     assert client.post("/preview", content=b"{", headers=auth).status_code == 422
     assert client.post("/preview", json={"nope": 1}, headers=auth).status_code == 422
     blocked = client.post("/preview", json={"url": "bad"}, headers=auth)
-    assert blocked.json() == {"error": "blocked_destination"}
+    # Indistinguishable from an unreachable host: no internal DNS oracle.
+    assert (blocked.status_code, blocked.json()) == (502, {"error": "fetch_failed"})
     assert client.post("/preview", json={"url": "timeout"}, headers=auth).status_code == 504
     crashed = client.post("/preview", json={"url": "crash"}, headers=auth)
     assert crashed.status_code == 502 and SECRET_URL not in crashed.text

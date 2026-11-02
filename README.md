@@ -18,7 +18,7 @@ Includes expiring/password-protected invites, renewable sessions, WebSocket/poll
 delivery, confirmations, an admin UI and a browser test client with 1 MiB attachments.
 Text/cards arrive independently of media transfers; see [media and preview limits](docs/PROTOCOL.md#independent-media-delivery).
 
-The client is unaudited. Pre-1.0 upgrades reset server state; browser keys/history remain.
+Pre-1.0 upgrades reset server state; browser keys/history remain.
 Use matching assets; see [security limits](SECURITY.md) and [upgrades](docs/UPGRADING.md#upgrade).
 
 ## Setup

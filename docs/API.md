@@ -180,7 +180,7 @@ and [.env.example](../.env.example) for other quotas/configuration.
 
 ## Link previews
 
-`POST /api/v1/link-previews` with `{"url":"https://example.com/a"}` returns no-store JSON
+Senders call this for links they are about to send; recipients never do. `POST /api/v1/link-previews` with `{"url":"https://example.com/a"}` returns no-store JSON
 with nullable plain-text `title`, `description`, `site_name`, HTTPS `url` (`og:url`),
 `final_host` and `image` (`mime`, `width`, `height`, base64 `data` of a still JPEG/PNG/WebP
 up to 1 MiB). It returns 404 unless the [preview service](UPGRADING.md#link-preview-service)
