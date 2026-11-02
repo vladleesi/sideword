@@ -573,3 +573,23 @@ def test_the_whole_preview_shares_one_deadline(monkeypatch):
     net = Slow({"www.vimeo.com": response(200, page("<title>Late</title>"))})
     with pytest.raises((TimeoutError, lp.PreviewError)):
         preview("https://www.vimeo.com/1", net)
+
+
+def test_addresses_alternate_families_ipv6_first_within_the_attempt_limit():
+    mixed = ["93.184.216.34", "93.184.216.35", "2606:2800::1", "2606:2800::2"]
+    assert lp.interleave_families(mixed) == [
+        "2606:2800::1", "93.184.216.34", "2606:2800::2", "93.184.216.35"]
+    assert lp.interleave_families(["93.184.216.34"]) == ["93.184.216.34"]
+    only_v6 = ["2606:2800::1", "2606:2800::2"]
+    assert lp.interleave_families(only_v6) == only_v6
+
+    class Ipv6Only(FakeNet):
+        async def connect(self, address, server_name):
+            if ":" not in address:
+                self.connections.append((address, server_name))
+                raise OSError("network unreachable")
+            return await super().connect(address, server_name)
+    net = Ipv6Only({"example.com": response(200, page("<title>Over IPv6</title>"))},
+                   dns={"example.com": ["93.184.216.34", "93.184.216.35", "2606:2800::1"]})
+    assert preview("https://example.com/", net)["title"] == "Over IPv6"
+    assert net.connections == [("2606:2800::1", "example.com")]

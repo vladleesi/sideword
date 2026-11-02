@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.22.2 — 2026-11-02
+
+### Backend
+
+- Cap link-preview source images at 256 KiB instead of 1 MiB to keep preview traffic small on egress-limited hosts.
+- Try preview addresses IPv6 first, alternating with IPv4, so IPv6-only hosts such as cost-free cloud VMs reach dual-stack sites.
+
+### Web
+
+- Send link-preview images of at most 24 KB inside messages, including wide banners, since every recipient receives a copy.
+
 ## 0.22.1 — 2026-11-01
 
 ### Backend

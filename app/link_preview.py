@@ -33,7 +33,9 @@ MAX_OEMBED_BYTES = 64 * 1024
 OEMBED_TYPES = frozenset({"application/json", "application/json+oembed", "text/json"})
 MAX_HEADER_BYTES = 16 * 1024
 MAX_HTML_BYTES = 512 * 1024
-MAX_IMAGE_BYTES = 1024 * 1024
+# Small enough to keep preview transfers cheap on egress-limited hosts; browsers re-encode
+# accepted images to a 24 KB thumbnail anyway.
+MAX_IMAGE_BYTES = 256 * 1024
 MAX_IMAGE_DIMENSION = 4096
 MAX_IMAGE_PIXELS = 4_000_000
 MAX_ADDRESSES_TRIED = 2
@@ -183,7 +185,22 @@ async def resolve_public(host: str, resolver: Resolver) -> list[str]:
             addresses.append(str(address))
     if not addresses:
         raise PreviewError("fetch_failed")
-    return addresses
+    return interleave_families(addresses)
+
+
+def interleave_families(addresses: list[str]) -> list[str]:
+    """Order IPv6 first, alternating families, so limited attempts reach either stack.
+
+    IPv6-only hosts (common for cost-free cloud VMs) and IPv4-only hosts then both get a
+    usable address within MAX_ADDRESSES_TRIED, as in Happy Eyeballs (RFC 8305).
+    """
+
+    ipv6 = [address for address in addresses if ":" in address]
+    ipv4 = [address for address in addresses if ":" not in address]
+    ordered = []
+    for index in range(max(len(ipv6), len(ipv4))):
+        ordered.extend(group[index] for group in (ipv6, ipv4) if index < len(group))
+    return ordered
 
 
 def _tls_context() -> ssl.SSLContext:

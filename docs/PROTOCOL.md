@@ -49,7 +49,8 @@ Plaintext JSON has exactly one of these field sets:
   All six fields are required (`null` when absent): normalized credential-free HTTPS `url`
   up to 2,048 characters; `title` ≤200, `description` ≤400, `site_name` ≤80 characters
   without control characters; lowercase `final_host`; `image` null or canonical base64 of
-  a JPEG up to 96 KiB. At least one of title, description or image is set.
+  a JPEG up to 96 KiB (this client sends at most 24 KiB, since each recipient gets a copy).
+  At least one of title, description or image is set.
 - Link-preview follow-up: `{"v":1,"type":"link-preview","target":"<client message ID>","preview":{…}}`
   attaches a preview loaded after sending to the sender's own earlier text message (`target`:
   1–58 ASCII letters, digits, underscores or hyphens). Recipients resolve the target within

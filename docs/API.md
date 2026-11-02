@@ -187,7 +187,7 @@ Senders call this for links they are about to send; recipients never do.
 `POST /api/v1/link-previews` with `{"url":"https://example.com/a"}` returns no-store JSON
 built from page tags or the provider's oEmbed data, with nullable plain-text `title`,
 `description`, `site_name`, HTTPS `url` (`og:url`), `final_host` and `image` (`mime`,
-`width`, `height`, base64 `data` of a still JPEG/PNG/WebP up to 1 MiB). It returns 404
+`width`, `height`, base64 `data` of a still JPEG/PNG/WebP up to 256 KiB). It returns 404
 unless the [preview service](UPGRADING.md#link-preview-service) is configured, 422 for
 unsupported addresses (HTTPS on port 443 without credentials only), 429 at the per-user rate
 or concurrency limit and 502/503 on failure. Treat all fields as untrusted.

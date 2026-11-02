@@ -122,9 +122,11 @@ iptables -A SIDEWORD-PREVIEW -j DROP
 iptables -I DOCKER-USER -i sw-preview0 -j SIDEWORD-PREVIEW
 ```
 
-Persist the rules, block IPv6 equivalently if enabled, and verify that private, metadata and
-non-443 destinations fail from the container. Fetched sites see the fetcher's address; the
-relay can link accounts to requested URLs. Neither component logs or stores them.
+Persist the rules. With IPv6 enabled, apply equivalent `ip6tables` rules (TCP 443 to global
+unicast only); host `INPUT` filtering on the bridge must still allow ICMPv6 neighbor discovery,
+or IPv6 connections fail. Verify that private, metadata and non-443 destinations fail from the
+container. Fetched sites see the fetcher's address; the relay can link accounts to requested URLs.
+Neither component logs or stores them.
 
 ### Public asset transfers
 

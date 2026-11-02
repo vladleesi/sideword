@@ -21,7 +21,8 @@ const LINK_PREVIEW_PARALLEL = 3;
 // Draft URLs are prefetched once they look complete: followed by text, pasted, or after a pause.
 const LINK_PREFETCH_IDLE_MS = 700;
 // Wide images become a banner; others a small square thumbnail.
-const LINK_BANNER = { bytes: 96 * 1024, dimension: 640 };
+// Every recipient gets its own copy of the image, so even banners stay at 24 KB.
+const LINK_BANNER = { bytes: 24 * 1024, dimension: 320 };
 const LINK_THUMBNAIL = { bytes: 24 * 1024, dimension: 160 };
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const VIEWER_ZOOM_LEVELS = [1, 1.5, 2, 3, 4];

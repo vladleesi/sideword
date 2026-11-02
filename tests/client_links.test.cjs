@@ -540,3 +540,11 @@ test('link-preview follow-up payloads are strictly validated', () => {
   assert.equal(check(followUp('m1', senderPreview({ url: 'http://example.com/a' }))), false);
   assert.equal(check({ v: 1, type: 'link-preview', target: 'm1' }), false);
 });
+
+test('preview images sent in messages stay at 24 KB, including wide banners', async () => {
+  const app = previewClient({ wide: true });
+  typeDraft(app, 'https://example.com/wide ', 'insertFromPaste');
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(app.run('reduced'))), [[24576, 320]]);
+  assert.ok(app.run('linkPreviewResults.get("https://example.com/wide").image.banner'));
+});
