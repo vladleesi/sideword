@@ -4,14 +4,15 @@ Security fixes target the latest `main` code; Sideword is pre-1.0.
 
 ## Report a vulnerability
 
-Use GitHub **Security → Report a vulnerability**. Include affected versions,
-reproduction and impact. Keep findings out of public issues/PRs. If private reporting
-is unavailable, request a private contact channel without disclosing details.
+Private vulnerability reporting is currently disabled for this repository. Request a
+private contact channel without disclosing details; keep findings out of public issues
+and pull requests. Include affected versions, reproduction and impact in the private
+report. If reporting is enabled later, use GitHub **Security → Report a vulnerability**.
 Initial acknowledgement is expected within seven days; resolution depends on severity.
 
 ## Security limits
 
-The browser client has not had an independent security audit. V1 has no recipient forward
+Sideword is experimental and has not had an independent security or cryptographic audit. V1 has no recipient forward
 secrecy or post-compromise recovery; first-use pins cannot authenticate initial keys or
 malicious served code.
 Read the [security review](docs/SECURITY_REVIEW.md) and [protocol](docs/PROTOCOL.md).

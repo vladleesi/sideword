@@ -1,4 +1,4 @@
-"""Lightweight browser client for local and interoperability testing."""
+"""Bundled Sideword browser messenger."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ CLIENT_HEADERS = {
 
 @router.get("/client", response_class=HTMLResponse)
 async def test_client(request: Request, invite: str = "") -> HTMLResponse:
-    """Serve the dependency-free test client with a locked-down policy."""
+    """Serve the dependency-free web messenger with a locked-down policy."""
 
     safe_invite = invite if len(invite) <= 128 else ""
     return templates.TemplateResponse(

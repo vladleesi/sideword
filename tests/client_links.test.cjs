@@ -56,7 +56,7 @@ test('shows Unicode hosts for inspection and flags lookalike or deceptive hosts'
   assert.equal(credentials.host, 'attacker.example');
   assert.deepEqual([...credentials.warnings], ['Text before @ is not the site']);
   // Bidi overrides and zero-width characters end a link instead of hiding part of it.
-  assert.deepEqual(found('https://example.com/‮gpj.exe https://example.org​/x'),
+  assert.deepEqual(found('https://example.com/\u202Egpj.exe https://example.org\u200B/x'),
     ['https://example.com/', 'https://example.org']);
   // A host that does not parse back to the same ASCII form is shown in ASCII.
   assert.equal(links.findLinks('https://%65xample.com/')[0].displayHost, 'example.com');
@@ -396,4 +396,143 @@ test('an unusable preview never blocks sending', async () => {
   typeDraft(good, 'https://example.com/a ', 'insertFromPaste');
   await flush();
   assert.equal(good.run('textPayloadWithPreview("https://example.com/a", 1)').preview.url, 'https://example.com/a');
+});
+
+// Late previews: the sender's follow-up message attaches a preview to its own earlier message.
+let deliveryCounter = 0;
+async function receive(app, sender, clientMessageId, payload) {
+  const message = { chat_id: 7, sender_public_id: sender, client_message_id: clientMessageId,
+    delivery_id: (++deliveryCounter).toString(16).padStart(32, '0'), created_at: '2026-11-01T00:00:00Z',
+    testPayload: payload };
+  app.run('value => { globalThis.incomingMessage = value; }')(message);
+  await app.run(`(async () => {
+    decryptMessage = async message => JSON.stringify(message.testPayload);
+    queueDelivery = () => {};
+    await processMessages([incomingMessage]);
+  })()`);
+}
+const rowFor = (app, sender, id) => app.nodes.get('#message-list').children
+  .find(row => row.messageEntry.id === `incoming:${JSON.stringify([7, sender, id])}`);
+const textMessage = text => ({ v: 1, type: 'text', text });
+const followUp = (target, preview = senderPreview()) => ({ v: 1, type: 'link-preview', target, preview });
+
+test('a late preview from the sender appears on both sides without any recipient request', async () => {
+  const app = previewClient({ available: false });
+  await receive(app, 'peer-a', 'm1', textMessage('see https://example.com/a'));
+  const row = rowFor(app, 'peer-a', 'm1');
+  assert.equal(row.linkCard, undefined);
+  await receive(app, 'peer-a', 'p1', followUp('m1'));
+  assert.equal(row.linkCard.children[0].children[0].children[1].textContent, '<img src=x onerror=alert(1)>');
+  assert.equal(calls(app).length, 0);
+  // The follow-up itself is hidden and never shown as a message.
+  assert.equal(app.nodes.get('#message-list').children.length, 1);
+});
+
+test('only the original sender can attach a preview, once, to its own first link', async () => {
+  const app = previewClient();
+  await receive(app, 'peer-a', 'm1', textMessage('see https://example.com/a'));
+  await receive(app, 'peer-b', 'p1', followUp('m1')); // Another participant: ignored.
+  assert.equal(rowFor(app, 'peer-a', 'm1').linkCard, undefined);
+  await receive(app, 'peer-a', 'p2', followUp('m1', senderPreview({ url: 'https://evil.example/' })));
+  assert.equal(rowFor(app, 'peer-a', 'm1').linkCard, undefined); // Not the message's link.
+  await receive(app, 'peer-a', 'm2', textMessage('https://example.com/a'));
+  await receive(app, 'peer-a', 'p3', followUp('m2', senderPreview({ title: 'First' })));
+  await receive(app, 'peer-a', 'p4', followUp('m2', senderPreview({ title: 'Replacement' })));
+  assert.equal(rowFor(app, 'peer-a', 'm2').linkCard.children[0].children[0].children[1].textContent, 'First');
+});
+
+test('a follow-up that arrives before its message applies when the message arrives', async () => {
+  const app = previewClient();
+  await receive(app, 'peer-a', 'p1', followUp('m1'));
+  await receive(app, 'peer-a', 'm1', textMessage('see https://example.com/a'));
+  assert.ok(rowFor(app, 'peer-a', 'm1').linkCard);
+});
+
+test('late previews ease in when visible and appear without animation offscreen', async () => {
+  for (const [visible, reduced] of [[true, false], [false, false], [true, true]]) {
+    const app = previewClient();
+    app.run(`window.matchMedia = query => ({ matches: ${reduced} && query.includes('reduce') });`);
+    await receive(app, 'peer-a', 'm1', textMessage('https://example.com/a'));
+    const row = rowFor(app, 'peer-a', 'm1');
+    const animations = [];
+    row.messageBubble.getBoundingClientRect = () => visible
+      ? (row.linkCard ? { top: 0, bottom: 180, width: 320, height: 180 } : { top: 0, bottom: 40, width: 140, height: 40 })
+      : { top: -500, bottom: -460, width: 140, height: 40 };
+    row.messageBubble.animate = frames => { animations.push(frames); return { finished: Promise.resolve() }; };
+    const create = app.document.createElement;
+    app.document.createElement = tag => {
+      const node = create(tag);
+      if (tag === 'a') node.animate = frames => { animations.push(frames); return { finished: Promise.resolve() }; };
+      return node;
+    };
+    await receive(app, 'peer-a', 'p1', followUp('m1', senderPreview({ image: null })));
+    assert.ok(row.linkCard);
+    if (visible && !reduced) {
+      assert.equal(animations[0][0].width, '140px');
+      assert.equal(animations[0][1].width, '320px');
+      assert.equal(animations[1][0].opacity, 0);
+    } else assert.equal(animations.length, 0);
+  }
+});
+
+test('when the preview is not ready at send, it follows in an encrypted message to the same recipients', async () => {
+  const app = previewClient();
+  app.run(`globalThis.queued = []; globalThis.release = [];
+    previewReply = () => new Promise(resolve => release.push(resolve));
+    queueEncryptedMessage = async (chat, recipients, messageId, payload) => {
+      queued.push({ chat: chat.id, recipients: recipients.map(peer => peer.public_id), payload }); };
+    flushOutbox = async () => {}; renderOutbox = async () => {}; assertTrustedPeer = async () => {};`);
+  // Sent immediately without a preview; loading continues for this message.
+  assert.equal(app.run('sendLinkPreview("see https://example.com/a", 2)'), null);
+  app.run(`followUpLinkPreview(7, 'sent-1', 'see https://example.com/a',
+    chats[0].participants.filter(peer => peer.public_id !== 'me'))`);
+  await flush();
+  assert.equal(calls(app).length, 1);
+  typeDraft(app, 'a new unrelated draft'); // Editing the draft must not cancel it.
+  app.run('release.forEach(resolve => resolve({ title: "Loaded later" }))');
+  await flush();
+  const [sent] = JSON.parse(JSON.stringify(app.run('queued')));
+  assert.equal(sent.chat, 7);
+  assert.deepEqual(sent.recipients, ['peer-a', 'peer-b']);
+  assert.equal(sent.payload.type, 'link-preview');
+  assert.equal(sent.payload.target, 'sent-1');
+  assert.equal(sent.payload.preview.title, 'Loaded later');
+  // Finished while the message was being encrypted: the follow-up goes out at once.
+  app.run(`linkPreviewResults.set('https://example.com/b', { title: 'Ready', description: null, siteName: null,
+    finalHost: null, image: null }); followUpLinkPreview(7, 'sent-2', 'https://example.com/b',
+    chats[0].participants.filter(peer => peer.public_id !== 'me'))`);
+  await flush();
+  assert.equal(app.run('queued[1].payload.target'), 'sent-2');
+  // Failed previews send nothing.
+  app.run(`previewReply = new ClientError('Chat request failed (HTTP 502). Down');
+    followUpLinkPreview(7, 'sent-3', 'https://example.com/c', chats[0].participants.filter(peer => peer.public_id !== 'me'))`);
+  await flush();
+  assert.equal(app.run('queued.length'), 2);
+});
+
+test("the sender's own message gets the card when its follow-up is stored", async () => {
+  const app = previewClient();
+  app.run(`identity.retryWindowSeconds = 86400;`);
+  await app.run(`storeOutgoing({ chatId: 7, messageId: 'own-1', createdAt: Date.now(),
+    envelopes: [{ recipient_public_id: 'peer-a', ciphertext: 'x' }], payload: SidewordProtocol.textPayload('read https://example.com/a') })`);
+  const row = app.nodes.get('#message-list').children.find(node => node.messageEntry.id === 'outgoing:own-1');
+  assert.equal(row.linkCard, undefined);
+  app.run('value => { globalThis.followUpPayload = value; }')(followUp('own-1'));
+  await app.run(`storeOutgoing({ chatId: 7, messageId: 'own-preview-1', createdAt: Date.now(),
+    envelopes: [{ recipient_public_id: 'peer-a', ciphertext: 'x' }], payload: SidewordProtocol.validatePayload(followUpPayload) })`);
+  assert.ok(row.linkCard);
+  assert.equal(app.nodes.get('#message-list').children.length, 1);
+});
+
+test('link-preview follow-up payloads are strictly validated', () => {
+  const app = linkClient();
+  const check = payload => {
+    try { app.run('SidewordProtocol.validatePayload')(payload); return true; } catch { return false; }
+  };
+  assert.equal(check(followUp('0b8e7c1e-2b4f-4f0e-9a51-0a2c1f6f3d10')), true);
+  assert.equal(check({ ...followUp('m1'), text: 'extra' }), false);
+  assert.equal(check(followUp('../m1')), false);
+  assert.equal(check(followUp('x'.repeat(59))), false);
+  assert.equal(check(followUp('m1', senderPreview({ url: 'http://example.com/a' }))), false);
+  assert.equal(check({ v: 1, type: 'link-preview', target: 'm1' }), false);
 });

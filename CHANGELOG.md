@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.21.0 — 2026-11-01
+
+### Backend
+
+- Rename the product to Sideword in the API title and description, server pages and release documentation; operational names, settings and storage identifiers are unchanged.
+- Load link previews through official oEmbed APIs for YouTube, Vimeo, Reddit, TikTok, Spotify and SoundCloud, and through a page's advertised oEmbed endpoint when it has no preview tags; only plain-text fields and thumbnails are used, with the same fetch protections and one 12-second budget.
+
+### Web
+
+- Deliver link previews that finish loading after Send: the sender's client sends them in an encrypted follow-up bound to the original message, so sender and recipients both see the card ease in while recipients still never fetch; clients before 0.21.0 keep such follow-ups queued until reloaded.
+- Present the bundled client as the Sideword web messenger.
+
 ## 0.20.0 — 2026-11-01
 
 ### Backend

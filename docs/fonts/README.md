@@ -11,4 +11,4 @@ only for the right and northeast arrows. Font preloads in `index.html` match the
 Latin1 files used above the fold. When adding characters outside these ranges,
 include the appropriate upstream subset and its Unicode range.
 
-Keep the complete fonts: the reference client's font assets share their contents.
+Keep the complete fonts: the bundled web client's font assets share their contents.

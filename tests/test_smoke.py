@@ -100,10 +100,10 @@ async def _run() -> None:
             pt = personal_tokens[-1]
             gt = group_tokens[-1]
 
-            # ---------- Browser test client ----------
+            # ---------- Bundled web messenger ----------
             r = await c.get(f"/client?invite={pt}")
             assert r.status_code == 200
-            assert "Sideword test client" in r.text
+            assert "Sideword web messenger" in r.text
             assert f'value="{pt}"' in r.text
             assert r.headers["cache-control"] == "no-store"
             assert "default-src 'none'" in r.headers["content-security-policy"]

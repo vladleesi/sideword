@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Sideword Server{% endblock %}
+{% block title %}Sideword{% endblock %}
 {# The public server page keeps the shared product mark; admin pages use the admin palette. #}
 {% block icons %}
 <link rel="icon" href="/static/mark.svg?v=1" type="image/svg+xml">
@@ -9,8 +9,8 @@
 {% block content %}
 <section class="card center">
   <h1>Sideword</h1>
-  <p>Link-only messenger backend.</p>
+  <p>Self-hosted, end-to-end encrypted messenger.</p>
   <p class="muted small">Admin UI: <a href="/admin/login">/admin/login</a></p>
-  <p class="muted small">Encrypted test client: <a href="/client">/client</a></p>
+  <p class="muted small">Web messenger: <a href="/client">/client</a></p>
 </section>
 {% endblock %}

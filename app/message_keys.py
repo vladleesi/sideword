@@ -1,4 +1,4 @@
-"""Validate the reference client's raw P-256 public keys using OpenSSL."""
+"""Validate the bundled web client's raw P-256 public keys using OpenSSL."""
 
 from cryptography.hazmat.primitives.asymmetric import ec
 

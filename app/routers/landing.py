@@ -1,6 +1,6 @@
 """Landing pages.
 
-Route ``/l/{token}`` explains an invite link and links to the bundled test client.
+Route ``/l/{token}`` explains an invite link and links to the bundled web messenger.
 """
 
 from __future__ import annotations

@@ -1,6 +1,7 @@
 # Contributing
 
-Keep changes focused; discuss API/storage/protocol changes first. Follow the
+Sideword includes the FastAPI backend, bundled web messenger, admin interface, deployment
+tooling and documentation. Keep changes focused; discuss API/storage/protocol changes first. Follow the
 [license](LICENSE), [conduct policy](CODE_OF_CONDUCT.md) and [repository rules](AGENTS.md).
 Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 
@@ -22,6 +23,27 @@ Run the [required checks](AGENTS.md#project-checks) with isolated databases;
 [CI](.github/workflows/test.yml) lists all checks. Add regression tests and update
 changed contracts/docs. Dependency/image changes also need `python -m pip check`,
 `python -m pip_audit --strict` and a Docker build.
+
+## Application and contract versions
+
+`app/version.py` defines the Sideword application release (currently 0.20.0).
+The backend and bundled browser client share this version and ship in the same image;
+there is no independent web client release. The web/admin headers, health response and
+OpenAPI release field report it. Documentation and repository identity maintenance do
+not require a version bump or a new changelog release section.
+
+| Version or revision | Meaning |
+| --- | --- |
+| Application `MAJOR.MINOR.PATCH` | One backend/web application release, tags and changelog |
+| HTTP `/api/v1` | API contract, independent of the application release |
+| WebSocket `sideword.v1` | WebSocket subprotocol; see [API](docs/API.md#receive-messages-and-receipts) |
+| Cryptographic envelope `v: 1` | Encryption format; see [protocol](docs/PROTOCOL.md#wire-representation) |
+| Message payload `v: 1` | Decrypted message format; see [payloads](docs/PROTOCOL.md#application-payload-v1) |
+| Static asset `?v=N` | Cache-busting revision, not SemVer or a client release |
+
+Deploy templates and assets together. Unchanged version markers do not guarantee that
+older clients accept new payload types; follow the release's compatibility notes and
+[upgrade rules](docs/UPGRADING.md#upgrade).
 
 ## Dependency monitoring
 

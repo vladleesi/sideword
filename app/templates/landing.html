@@ -13,7 +13,7 @@
 <body class="auth-page">
   <header class="client-header">
     <a class="client-brand" href="/client"><img src="/static/mark.svg?v=1" width="28" height="28" alt="">Sideword<span aria-hidden="true"> /</span></a>
-    <span class="test-badge">Test client · <span class="app-version">v{{ app_version }}</span></span>
+    <span class="test-badge">Web client · <span class="app-version">v{{ app_version }}</span></span>
   </header>
   <main class="auth-main">
     <section class="setup-panel invite-panel" aria-labelledby="invite-heading">
@@ -28,8 +28,8 @@
         <p>Open it in a compatible Sideword client to activate.</p>
         {% if details.password_required %}<p>The room also requires a phrase or password. Ask the creator for it separately.</p>{% endif %}
         <p class="muted">Opening this page does not reserve a participant slot.</p>
-        <a class="button primary" href="/client?invite={{ token|urlencode }}">Open test web client</a>
-        <p class="muted small">The bundled browser client is intended for testing.</p>
+        <a class="button primary" href="/client?invite={{ token|urlencode }}">Open web messenger</a>
+        <p class="muted small">Sideword is experimental. Verify peer fingerprints through another trusted channel.</p>
         <details class="invite-token">
           <summary>Invite token</summary>
           <code class="technical-value">{{ token }}</code>

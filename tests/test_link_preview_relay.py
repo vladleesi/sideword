@@ -33,7 +33,7 @@ def enabled(monkeypatch):
     async def service(_settings, url):
         calls.append(url)
         return 200, json.dumps({
-            "title": "Title‮ <script>alert(1)</script>", "description": "D" * 900,
+            "title": "Title\u202e <script>alert(1)</script>", "description": "D" * 900,
             "site_name": "Site", "url": "javascript:alert(1)", "final_host": "example.com",
             "image": {"mime": "image/png", "width": 2, "height": 2,
                       "data": base64.b64encode(PNG).decode()},

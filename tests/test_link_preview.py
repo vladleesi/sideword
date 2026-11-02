@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import gzip
+import json
 import logging
 import struct
 import zlib
@@ -210,7 +211,7 @@ def test_redirect_count_is_bounded_and_relative_redirects_work():
 
 
 def test_extracts_open_graph_fields_with_fallbacks_and_bounds():
-    head = ('<meta property="og:title" content="  OG &amp; title‮\x07 ">'
+    head = ('<meta property="og:title" content="  OG &amp; title\u202e\x07 ">'
             '<meta property="og:description" content="' + "d" * 2000 + '">'
             '<meta property="og:site_name" content="Site">'
             '<meta property="og:url" content="/canonical">'
@@ -486,3 +487,89 @@ def test_service_and_fetcher_never_log_urls_or_content(caplog, capsys):
     captured = capsys.readouterr()
     for text in (caplog.text, captured.out, captured.err):
         assert "never-log-this" not in text and "secret page body" not in text and TOKEN not in text
+
+
+# Official oEmbed for known providers and discovered endpoints, through the same protections.
+JPEG = (MEDIA / "valid.jpg").read_bytes()
+
+
+def oembed(data, content_type="application/json"):
+    body = data if isinstance(data, bytes) else json.dumps(data).encode()
+    return response(200, body, headers=(("Content-Type", content_type),))
+
+
+YOUTUBE_OEMBED = {
+    "title": "<b>Never</b> Gonna\u202e", "author_name": "Rick Astley", "provider_name": "YouTube",
+    "thumbnail_url": "https://i.ytimg.com/vi/x/hqdefault.jpg", "type": "video",
+    "html": "<iframe src=\"https://www.youtube.com/embed/x\"></iframe><script>alert(1)</script>",
+}
+
+
+@pytest.mark.parametrize("url", ["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://youtu.be/dQw4w9WgXcQ"])
+def test_known_providers_use_their_official_oembed_api_without_fetching_the_page(url):
+    net = FakeNet({"www.youtube.com": oembed(YOUTUBE_OEMBED),
+                   "i.ytimg.com": response(200, JPEG, headers=(("Content-Type", "image/jpeg"),))})
+    result = preview(url, net)
+    assert (result["title"], result["description"], result["site_name"]) == (
+        "<b>Never</b> Gonna", "Rick Astley", "YouTube")
+    assert result["image"]["mime"] == "image/jpeg"
+    assert "iframe" not in json.dumps(result, default=str)  # Provider HTML is never used.
+    assert [server for _, server in net.connections] == ["www.youtube.com", "i.ytimg.com"]
+    request = bytes(net.writers[0].sent).split(b"\r\n", 1)[0]
+    encoded = lp.quote(lp.validate_url(url).url, safe="").encode()
+    assert request == b"GET /oembed?format=json&url=" + encoded + b" HTTP/1.1"
+    assert result["final_host"] == lp.validate_url(url).host
+
+
+def test_provider_oembed_failures_fall_back_to_page_metadata():
+    for failure in (response(404, b""), oembed({"title": "x"}, "text/html"), oembed([1, 2]),
+                    oembed(b"{" * 50_000), oembed(b"x" * (lp.MAX_OEMBED_BYTES + 1)),
+                    oembed({"html": "<b>x</b>"})):
+        net = FakeNet({"vimeo.com": failure,
+                       "www.vimeo.com": response(
+                           200, page('<meta property="og:title" content="From page">'))})
+        assert preview("https://www.vimeo.com/123", net)["title"] == "From page"
+
+
+def test_pages_without_metadata_use_their_discovered_oembed_endpoint():
+    head = '<link rel="alternate" type="application/json+oembed" href="https://oembed.example.net/o?u=1">'
+    net = FakeNet({"example.com": response(200, page(head)),
+                   "oembed.example.net": oembed({"title": "Discovered",
+                                                 "provider_name": "Example"})})
+    result = preview("https://example.com/post", net)
+    assert (result["title"], result["site_name"], result["final_host"]) == (
+        "Discovered", "Example", "example.com")
+    # Pages with their own metadata never trigger discovery.
+    tagged = FakeNet({"example.com": response(200, page('<title>Own</title>' + head))})
+    assert preview("https://example.com/post", tagged)["title"] == "Own"
+    assert [server for _, server in tagged.connections] == ["example.com"]
+
+
+@pytest.mark.parametrize("href", ["http://oembed.example.net/o", "https://127.0.0.1/o", "https://localhost/o",
+                                  "javascript:alert(1)", "https://user@oembed.example.net/o"])
+def test_unsafe_discovered_oembed_endpoints_are_never_contacted(href):
+    head = f'<link rel="alternate" type="application/json+oembed" href="{href}">'
+    net = FakeNet({"example.com": response(200, page(head))})
+    assert code_of("https://example.com/post", net) == "no_metadata"
+    assert [server for _, server in net.connections] == ["example.com"]
+
+
+def test_oembed_thumbnails_use_the_image_protections():
+    for thumbnail in ("http://i.ytimg.com/a.jpg", "data:image/png;base64,AAAA", "https://10.0.0.1/a.jpg"):
+        net = FakeNet({"www.youtube.com": oembed({**YOUTUBE_OEMBED, "thumbnail_url": thumbnail})})
+        result = preview("https://www.youtube.com/watch?v=x", net)
+        assert result["image"] is None and result["title"] == "<b>Never</b> Gonna"
+        assert [server for _, server in net.connections] == ["www.youtube.com"]
+
+
+def test_the_whole_preview_shares_one_deadline(monkeypatch):
+    monkeypatch.setattr(lp, "TOTAL_DEADLINE_SECONDS", 0.05)
+
+    class Slow(FakeNet):
+        async def connect(self, address, server_name):
+            if server_name == "vimeo.com":
+                await asyncio.sleep(10)
+            return await super().connect(address, server_name)
+    net = Slow({"www.vimeo.com": response(200, page("<title>Late</title>"))})
+    with pytest.raises((TimeoutError, lp.PreviewError)):
+        preview("https://www.vimeo.com/1", net)

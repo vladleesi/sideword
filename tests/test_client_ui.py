@@ -87,7 +87,7 @@ def test_client_retains_controls_accessibility_and_separate_mobile_views():
         assert icons[0]["attrs"]["aria-hidden"] == "true"
         assert icons[0]["attrs"]["focusable"] == "false"
     assert tree.by_id("back-to-chats")["attrs"]["aria-label"] == "Back to conversations"
-    assert "Test client · " in html and "unaudited" not in html
+    assert "Web client · " in html and "unaudited" not in html
     assert "hidden" in tree.by_id("setup-panel")["attrs"]
     assert "hidden" not in tree.by_id("loading-panel")["attrs"]
     assert tree.by_id("loading-panel")["attrs"]["role"] == "status"
@@ -204,7 +204,7 @@ def test_admin_login_retains_original_styles_fields_csrf_and_errors():
 
 
 @pytest.mark.parametrize("status, expected, action", [
-    ("active", "Open it in a compatible Sideword client to activate.", "Open test web client"),
+    ("active", "Open it in a compatible Sideword client to activate.", "Open web messenger"),
     ("expired", "This link expired. Ask your administrator for a fresh invite.", None),
     ("used", "This room is sealed. All participant slots are filled.",
      "Reconnect from your joined browser"),
@@ -222,7 +222,7 @@ def test_invite_states_use_client_theme_and_preserve_status_messages(status, exp
     assert "client.css" in html
     assert "admin.css" not in html
     assert html.index("appearance.js") < html.index("client.css")
-    assert "Test client · " in html and "unaudited" not in html
+    assert "Web client · " in html and "unaudited" not in html
     assert len([node for node in Structure(html).nodes
                 if node["attrs"].get("name") == "appearance"]) == 3
     if action:
@@ -312,7 +312,7 @@ def test_attachment_cards_use_the_same_text_and_media_spacing_for_both_senders()
     assert "box-shadow" not in css
 
 
-def test_client_pages_show_the_backend_version_in_the_header_badge():
+def test_client_pages_show_the_application_version_in_the_header_badge():
     from app.version import __version__
     with TestClient(create_app(), base_url="https://testserver") as client:
         pages = [client.get("/client").text, client.get("/l/not-a-real-invite").text]
@@ -321,7 +321,7 @@ def test_client_pages_show_the_backend_version_in_the_header_badge():
         assert page.count('class="app-version"') == 1
 
 
-def test_admin_pages_show_the_backend_version_in_the_top_bar():
+def test_admin_pages_show_the_application_version_in_the_top_bar():
     from app.version import __version__
     with TestClient(create_app(), base_url="https://testserver") as client:
         page = client.get("/admin/login").text

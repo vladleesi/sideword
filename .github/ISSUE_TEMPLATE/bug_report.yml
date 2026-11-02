@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in Sideword Server
+description: Report a reproducible problem in Sideword
 title: "[Bug]: "
 labels: [bug]
 body:
@@ -23,8 +23,8 @@ body:
   - type: input
     id: revision
     attributes:
-      label: Version or commit
-      placeholder: Commit SHA, tag, or branch
+      label: Application version or commit
+      placeholder: Application version from the web app header, release tag, or commit SHA
     validations:
       required: true
   - type: dropdown
@@ -37,6 +37,11 @@ body:
         - Other
     validations:
       required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and operating system
+      description: For web messenger or admin interface issues. Do not include profile paths.
   - type: textarea
     id: logs
     attributes:

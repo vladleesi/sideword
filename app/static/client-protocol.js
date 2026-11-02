@@ -80,6 +80,13 @@ const SidewordProtocol = (() => {
 
   function validatePayload(payload) {
     if (!payload || Array.isArray(payload) || payload.v !== 1) throw payloadError();
+    if (payload.type === "link-preview") {
+      // A sender's later preview for its own earlier text message, identified by client message ID.
+      if (!exactKeys(payload, ["v", "type", "target", "preview"]) || typeof payload.target !== "string"
+          || !/^[A-Za-z0-9_-]{1,58}$/.test(payload.target)) throw payloadError();
+      validatePreview(payload.preview);
+      return payload;
+    }
     const fields = payload.type === "text"
       ? (Object.hasOwn(payload, "preview") ? ["v", "type", "text", "preview"] : ["v", "type", "text"])
       : payload.type === "attachment" ? ["v", "type", "name", "mime", "size", "data"]
@@ -117,6 +124,10 @@ const SidewordProtocol = (() => {
 
   function textPayload(text, preview = null) {
     return validatePayload(preview ? { v: 1, type: "text", text, preview } : { v: 1, type: "text", text });
+  }
+
+  function linkPreviewPayload(target, preview) {
+    return validatePayload({ v: 1, type: "link-preview", target, preview });
   }
 
   function filePayload(name, mime, bytes) {
@@ -273,6 +284,6 @@ const SidewordProtocol = (() => {
 
   return Object.freeze({ bytesToBase64, base64ToBytes, encryptForRecipient,
     decryptMessage, publicKeyFingerprint, ProtocolError, encodePayload, decodePayload,
-    textPayload, filePayload, fileReference, validatePayload, attachmentBytes, safeDownloadName,
+    textPayload, linkPreviewPayload, filePayload, fileReference, validatePayload, attachmentBytes, safeDownloadName,
     attachmentSendBytes, MAX_FILE_BYTES, MAX_SEND_BYTES, MAX_WIRE_CHARS, MAX_PREVIEW_IMAGE_BYTES });
 })();

@@ -84,9 +84,9 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Sideword Server",
+        title="Sideword",
         version=__version__,
-        description="Link-only messenger backend API.",
+        description="HTTP API for the Sideword invite-only messenger.",
         lifespan=lifespan,
     )
 

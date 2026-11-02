@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import ipaddress
+import json
 import re
 import socket
 import ssl
@@ -18,7 +19,7 @@ import zlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 
 import h11
 
@@ -26,6 +27,10 @@ MAX_URL_LENGTH = 2048
 MAX_REDIRECTS = 3
 CONNECT_TIMEOUT_SECONDS = 3
 FETCH_DEADLINE_SECONDS = 6
+# Whole preview (oEmbed, page and image) stays within the relay's 15-second service deadline.
+TOTAL_DEADLINE_SECONDS = 12
+MAX_OEMBED_BYTES = 64 * 1024
+OEMBED_TYPES = frozenset({"application/json", "application/json+oembed", "text/json"})
 MAX_HEADER_BYTES = 16 * 1024
 MAX_HTML_BYTES = 512 * 1024
 MAX_IMAGE_BYTES = 1024 * 1024
@@ -39,6 +44,19 @@ USER_AGENT = "SidewordLinkPreview/1 (metadata only)"
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 # Metadata lives in <head>; stop reading once the body starts.
 HEAD_END = re.compile(rb"</head|<body", re.IGNORECASE)
+
+# Official oEmbed endpoints for sites whose pages withhold usable metadata from unknown
+# fetchers. Requests still pass every SSRF, size and time check below.
+_OEMBED_PROVIDERS = (
+    (frozenset({"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
+                "youtu.be"}), "https://www.youtube.com/oembed?format=json&url="),
+    (frozenset({"vimeo.com", "www.vimeo.com"}), "https://vimeo.com/api/oembed.json?url="),
+    (frozenset({"reddit.com", "www.reddit.com", "old.reddit.com"}), "https://www.reddit.com/oembed?url="),
+    (frozenset({"tiktok.com", "www.tiktok.com"}), "https://www.tiktok.com/oembed?url="),
+    (frozenset({"open.spotify.com"}), "https://open.spotify.com/oembed?url="),
+    (frozenset({"soundcloud.com", "www.soundcloud.com", "m.soundcloud.com"}),
+     "https://soundcloud.com/oembed?format=json&url="),
+)
 
 _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 _BLOCKED_SUFFIXES = (".localhost", ".local", ".internal", ".intranet", ".lan", ".home.arpa",
@@ -336,10 +354,16 @@ class _MetadataParser(HTMLParser):
         self.title: list[str] = []
         self.in_title = False
         self.title_done = False
+        self.oembed: str | None = None
 
     def handle_starttag(self, tag, attrs):
         if tag == "title" and not self.title_done:
             self.in_title = True
+        elif tag == "link" and self.oembed is None:
+            values = {name.lower(): value for name, value in attrs if value is not None}
+            rel = values.get("rel", "").lower().split()
+            if "alternate" in rel and values.get("type", "").lower() == "application/json+oembed":
+                self.oembed = values.get("href", "")[:MAX_URL_LENGTH]
         elif tag == "meta":
             values = {name.lower(): value for name, value in attrs if value is not None}
             key = (values.get("property") or values.get("name") or "").strip().lower()
@@ -404,6 +428,38 @@ def parse_metadata(body: bytes, content_type: str, page_url: str) -> dict[str, s
         "site_name": clean_text(meta.get("og:site_name"), FIELD_LIMITS["site_name"]),
         "url": preview_url(meta.get("og:url"), page_url),
         "image_url": preview_url(image, page_url),
+        "oembed_url": preview_url(parser.oembed, page_url),
+    }
+
+
+def provider_oembed(target: Target) -> str | None:
+    """Return the official oEmbed endpoint for a known provider's page, if any."""
+
+    for hosts, endpoint in _OEMBED_PROVIDERS:
+        if target.host in hosts:
+            return endpoint + quote(target.url, safe="")
+    return None
+
+
+def parse_oembed(body: bytes, content_type: str, endpoint: str) -> dict[str, str | None]:
+    """Use only plain-text oEmbed fields and the thumbnail URL; never the provider's HTML."""
+
+    if media_type(content_type)[0] not in OEMBED_TYPES:
+        raise PreviewError("unsupported_content")
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        raise PreviewError("unsupported_content") from exc
+    if not isinstance(data, dict):
+        raise PreviewError("unsupported_content")
+    title = clean_text(data.get("title"), FIELD_LIMITS["title"])
+    author = clean_text(data.get("author_name"), FIELD_LIMITS["description"])
+    return {
+        "title": title or author,
+        "description": author if title else None,
+        "site_name": clean_text(data.get("provider_name"), FIELD_LIMITS["site_name"]),
+        "url": None,
+        "image_url": preview_url(data.get("thumbnail_url"), endpoint),
     }
 
 
@@ -493,23 +549,57 @@ def inspect_image(data: bytes, declared: str) -> tuple[str, int, int] | None:
     return mime, size[0], size[1]
 
 
+async def _within(deadline: float, operation):
+    """Run one fetch within both its own limit and the preview's remaining time."""
+
+    remaining = deadline - asyncio.get_running_loop().time()
+    if remaining <= 0:
+        operation.close()
+        raise TimeoutError
+    async with asyncio.timeout(min(FETCH_DEADLINE_SECONDS, remaining)):
+        return await operation
+
+
+async def _oembed(endpoint: str, deadline: float, resolver: Resolver,
+                  connector: Connector) -> dict[str, str | None] | None:
+    try:
+        _, content_type, body = await _within(deadline, fetch(
+            endpoint, accept="application/json", max_bytes=MAX_OEMBED_BYTES,
+            allow_truncation=False, resolver=resolver, connector=connector))
+        metadata = parse_oembed(body, content_type, endpoint)
+    except (PreviewError, TimeoutError):
+        return None
+    return metadata if metadata["title"] or metadata["image_url"] else None
+
+
 async def build_preview(url: str, *, resolver: Resolver = system_resolver,
                         connector: Connector = pinned_tls_connector) -> dict:
-    """Fetch page metadata and an optional validated thumbnail source image."""
+    """Fetch metadata (official oEmbed for known providers, page tags otherwise, discovered
+    oEmbed as a fallback) and an optional validated thumbnail source image."""
 
-    async with asyncio.timeout(FETCH_DEADLINE_SECONDS):
-        page, content_type, body = await fetch(
+    deadline = asyncio.get_running_loop().time() + TOTAL_DEADLINE_SECONDS
+    target = validate_url(url)
+    final_host = target.host
+    endpoint = provider_oembed(target)
+    metadata = await _oembed(endpoint, deadline, resolver, connector) if endpoint else None
+    if metadata is None:
+        page, content_type, body = await _within(deadline, fetch(
             url, accept="text/html,application/xhtml+xml;q=0.9", max_bytes=MAX_HTML_BYTES,
-            allow_truncation=True, resolver=resolver, connector=connector, stop=HEAD_END)
-    metadata = parse_metadata(body, content_type, page.url)
+            allow_truncation=True, resolver=resolver, connector=connector, stop=HEAD_END))
+        metadata = parse_metadata(body, content_type, page.url)
+        final_host = page.host
+        if (not (metadata["title"] or metadata["description"] or metadata["image_url"])
+                and metadata["oembed_url"]):
+            discovered = await _oembed(metadata["oembed_url"], deadline, resolver, connector)
+            if discovered:
+                metadata = {**discovered, "url": metadata["url"]}
     image = None
     if metadata["image_url"]:
         try:
-            async with asyncio.timeout(FETCH_DEADLINE_SECONDS):
-                _, image_type, image_body = await fetch(
-                    metadata["image_url"], accept="image/webp,image/png,image/jpeg",
-                    max_bytes=MAX_IMAGE_BYTES, allow_truncation=False,
-                    resolver=resolver, connector=connector)
+            _, image_type, image_body = await _within(deadline, fetch(
+                metadata["image_url"], accept="image/webp,image/png,image/jpeg",
+                max_bytes=MAX_IMAGE_BYTES, allow_truncation=False,
+                resolver=resolver, connector=connector))
             checked = inspect_image(image_body, media_type(image_type)[0])
             if checked:
                 image = {"mime": checked[0], "width": checked[1], "height": checked[2],
@@ -520,4 +610,4 @@ async def build_preview(url: str, *, resolver: Resolver = system_resolver,
         raise PreviewError("no_metadata")
     return {"title": metadata["title"], "description": metadata["description"],
             "site_name": metadata["site_name"], "url": metadata["url"],
-            "final_host": page.host, "image": image}
+            "final_host": final_host, "image": image}

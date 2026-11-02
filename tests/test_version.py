@@ -1,4 +1,4 @@
-"""The health probe and API schema identify the same backend release."""
+"""The health probe and API schema identify the same application release."""
 
 import re
 
@@ -14,4 +14,4 @@ def test_release_version_is_shared_by_health_and_openapi():
     assert client.get("/health").json() == {"status": "ok", "version": __version__}
     info = client.get("/openapi.json").json()["info"]
     assert info["version"] == __version__
-    assert info["title"] == "Sideword Server"
+    assert info["title"] == "Sideword"

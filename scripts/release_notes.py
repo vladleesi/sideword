@@ -1,4 +1,4 @@
-"""Extract the current backend release's changelog section for GitHub."""
+"""Extract the current application release's changelog section for GitHub."""
 
 import argparse
 import re

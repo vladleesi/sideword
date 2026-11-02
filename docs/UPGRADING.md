@@ -20,6 +20,9 @@ cannot guarantee physical erasure from SSDs, old backups, snapshots or host memo
 
 ## Upgrade
 
+0.21.0 adds an encrypted link-preview follow-up message; 0.20.0 clients keep those messages
+queued until reloaded with matching assets.
+
 0.20.0 adds an optional encrypted link-preview field to text messages. Clients before 0.20.0
 reject those messages, which stay queued until the client is reloaded with matching assets.
 
@@ -130,3 +133,43 @@ query-string cache keys and `public, max-age=3600, must-revalidate`. Deploy temp
 together and advance revisions; old revision URLs serve current files. Purge reused revisions
 on rollback. Keep client/invite/API/admin/redirect/error responses `no-store`, uncompressed,
 and preserve WS/private buffering rules. Verify proxy/CDN behavior after deployment.
+
+## Repository identity and integrations
+
+The source repository is [vladleesi/sideword](https://github.com/vladleesi/sideword).
+Existing clones can update their remote without renaming their checkout directory:
+
+```sh
+git remote set-url origin https://github.com/vladleesi/sideword.git
+# For an existing SSH remote, use git@github.com:vladleesi/sideword.git instead.
+```
+
+Repository branding does not rename operational resources. Preserve existing checkout
+and deployment directories, Compose project names/networks, the `sideword` service,
+`sideword-chat-server` container/image tag, `sideword-data` volume, database mounts,
+`SIDEWORD_` settings and browser storage identifiers. Changing a checkout directory can
+change Compose's default project name; keep the existing project identity for existing
+installations. A repository rename alone requires no database reset or service restart.
+
+Actions derives API/release/artifact lookups from `github.repository` or
+`GITHUB_REPOSITORY`. Promotion remains exact-commit `develop` → `main`; backend
+activation and the Pages workflow remain manual. Existing Pages settings can also
+publish directly from `main:/docs`; check the repository's actual Pages source before
+assuming publication requires a workflow dispatch.
+
+Before the next manual deployment, verify external integrations against the renamed
+repository: Google Workload Identity provider attribute conditions/mappings, service
+account IAM bindings and any GitHub OIDC `sub` allowlists may match the repository name.
+Use `repo:vladleesi/sideword:ref:refs/heads/main` where a default branch subject was
+previously bound to the old name; environment/custom subjects differ. Preserve existing
+provider, service account, registry, VM and secret resources. Check GitHub App/Renovate
+access and external webhooks/consumers separately. Local workflow review cannot verify
+cloud IAM policies or third-party configuration; do not dispatch a deployment merely
+to test a rename.
+
+Pages project paths follow the repository name. The site's canonical URL is
+`https://vladleesi.dev/sideword/`, under the existing account domain; the repository has
+no separate custom domain. Preserve Pages source/domain settings, verify HTTPS and the
+new path, and update the homepage, canonical/social URLs, sitemap and robots together.
+Do not rely on the former project-site path redirecting. Publishing revised site content
+requires it to reach the configured Pages source or an authorized Pages deployment.

@@ -6,9 +6,10 @@ Describe the problem and the approach taken.
 
 - [ ] `python -m ruff check .`
 - [ ] `python -m pytest`
-- [ ] Documentation was updated when needed
+- [ ] Relevant JavaScript syntax and Node tests from CI pass
+- [ ] Documentation and links were updated when needed
 - [ ] No secrets, local databases, or generated exports are included
 
 ## Compatibility
 
-Describe any API, configuration, database, or deployment impact.
+Describe any web client, API, protocol, configuration, database, or deployment impact.

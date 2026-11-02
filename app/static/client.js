@@ -92,6 +92,8 @@ const downloadUrls = new Map();
 const mediaPreviews = globalThis.SidewordMedia?.createManager(scheduleVisiblePreviews);
 const shownPreviews = new Set();
 const receivedMedia = new Map();
+// Message ID -> preview that arrived in a later follow-up from the message's sender.
+const receivedPreviews = new Map();
 const mediaFailures = new Map();
 const mediaUploadStates = new Map();
 let mediaTimer = null;
@@ -112,6 +114,9 @@ const draftLinkPreviews = new Set();
 let draftPrefetchTimer = null;
 // Payload preview -> decoded card data, so re-renders do not decode images again.
 const decodedLinkPreviews = new WeakMap();
+// href -> sent messages still waiting for their preview; it follows in an encrypted message.
+const sentLinkPreviews = new Map();
+const LINK_CARD_ANIMATION_MS = 200;
 // In-memory reveals only: reload returns incoming images to the selected privacy mode.
 const revealedImages = new Set();
 let requestedPreview = null;
@@ -722,7 +727,7 @@ async function persistHistoryEntry(chatId, entry, allowed = null) {
 
 async function loadStoredHistory() {
   if (!identity?.storageKey || !identity.publicId) return;
-  if (!messagesByChat.size) { loadedHistoryKeys.clear(); receivedMedia.clear(); revealedImages.clear(); }
+  if (!messagesByChat.size) { loadedHistoryKeys.clear(); receivedMedia.clear(); receivedPreviews.clear(); revealedImages.clear(); }
   const records = (await readHistoryRecords()).filter(record => !loadedHistoryKeys.has(record.key));
   // Decrypt in parallel, then append without per-record renders: one layout for the whole load.
   const decrypted = await Promise.all(records.map(async record => {
@@ -1036,10 +1041,18 @@ function outgoingMessageId(entry) {
 }
 
 function hiddenMessageEntry(entry) {
-  return ["receipt", "acceptance", "viewed", "read_ack", "delivery_ack", "delivery_ref", "send_failed", "delivery_state", "media_ready"].includes(entry.kind);
+  return ["receipt", "acceptance", "viewed", "read_ack", "delivery_ack", "delivery_ref", "send_failed", "delivery_state", "media_ready", "link_preview"].includes(entry.kind);
 }
 
 function indexMessageMetadata(chatId, entry) {
+  if (entry.kind === "link_preview") {
+    // First preview wins: a message's card cannot be replaced later.
+    if (!receivedPreviews.has(entry.target)) receivedPreviews.set(entry.target, entry.preview);
+    const original = messagesByChat.get(chatId)?.find(message => message.id === entry.target);
+    if (original && !original.preview) original.preview = receivedPreviews.get(entry.target);
+    return;
+  }
+  if (entry.id && !entry.preview && receivedPreviews.has(entry.id)) entry.preview = receivedPreviews.get(entry.id);
   if (entry.kind === "media_ready") {
     receivedMedia.set(entry.target, entry);
     const original = messagesByChat.get(chatId)?.find(message => message.id === entry.target);
@@ -1513,6 +1526,7 @@ function renderMessages(openAtLatest = false) {
     if (existing) {
       existing.messageEntry = entry;
       if (existing.messageText !== messageTextContent) renderMessageText(existing, messageTextContent);
+      else updateLinkPreview(existing, true); // A preview that arrived after the message.
       if (entry.attachment) updateAttachmentCard(existing);
       updateMessageHeader(existing, selectedChatId, entry, previous, timestampFormatters);
       if (list.children[position] !== existing) list.insertBefore(existing, list.children[position] || null);
@@ -1761,13 +1775,15 @@ function previewableLink(link) {
 
 // Previews are made by the sender and travel inside the encrypted message, so rendering never
 // contacts any server: a link's owner cannot learn when a recipient opened the message.
-function updateLinkPreview(message) {
+function updateLinkPreview(message, late = false) {
   const preview = linkPreviewMode === "on" && !message.messageEntry.attachment ? messagePreview(message) : null;
   const key = preview?.url || "";
   if ((message.linkPreviewKey || "") === key && Boolean(message.linkCard) === Boolean(key)) return;
   releaseLinkPreview(message);
   if (!preview) return;
-  showLinkPreview(message, (message.messageLinks || []).find(previewableLink), preview);
+  const link = (message.messageLinks || []).find(previewableLink);
+  if (late) revealLinkPreview(message, link, preview);
+  else showLinkPreview(message, link, preview);
 }
 
 // The payload preview must describe the message's first previewable link; anything else is ignored.
@@ -1797,7 +1813,7 @@ function drainLinkPreviews() {
   while (linkPreviewPending.size < LINK_PREVIEW_PARALLEL && linkPreviewQueue.size && linkPreviewMode === "on") {
     const [key, waiting] = [...linkPreviewQueue].at(-1);
     linkPreviewQueue.delete(key);
-    if (!draftLinkPreviews.has(key)) continue;
+    if (!linkPreviewWanted(key)) continue;
     linkPreviewPending.set(key, waiting);
     void loadLinkPreview(key, waiting);
   }
@@ -1809,7 +1825,11 @@ async function loadLinkPreview(key, waiting) {
   try {
     const preview = await fetchLinkPreview(waiting.link, waiting.controller.signal);
     // Turned off, session changed, or the draft dropped this address meanwhile: keep nothing.
-    if (generation === linkPreviewGeneration && draftLinkPreviews.has(key)) rememberLinkPreview(key, preview);
+    if (generation !== linkPreviewGeneration || !linkPreviewWanted(key)) return;
+    rememberLinkPreview(key, preview);
+    const sent = sentLinkPreviews.get(key) || [];
+    sentLinkPreviews.delete(key);
+    if (preview) for (const item of sent) void sendLinkPreviewFollowUp(item, waiting.link, preview);
   } finally {
     if (linkPreviewPending.get(key) === waiting) linkPreviewPending.delete(key);
     drainLinkPreviews();
@@ -1876,13 +1896,20 @@ function rememberLinkPreview(href, preview) {
   while (linkPreviewResults.size > LINK_PREVIEW_CACHE_SIZE) linkPreviewResults.delete(linkPreviewResults.keys().next().value);
 }
 
+function linkPreviewWanted(key) {
+  return draftLinkPreviews.has(key) || sentLinkPreviews.has(key);
+}
+
 // At send time: the draft's already loaded preview for the message's first previewable link.
-// Sending never waits and starts no request; without a ready preview the message is sent as is.
+// Sending never waits; a preview still loading follows later in its own encrypted message.
 function sendLinkPreview(text, recipientCount) {
   if (linkPreviewMode !== "on") return null;
   const link = (globalThis.SidewordLinks?.findLinks(text) || []).find(previewableLink);
   const preview = link ? linkPreviewResults.get(link.href) : null;
-  if (!preview) return null;
+  return preview ? linkPreviewPayload(link, preview, recipientCount) : null;
+}
+
+function linkPreviewPayload(link, preview, recipientCount) {
   const payload = { url: link.href, title: preview.title, description: preview.description,
     site_name: preview.siteName, final_host: preview.finalHost, image: null };
   // Each recipient gets its own copy: include the image only when all copies stay well in budget.
@@ -1900,6 +1927,44 @@ function textPayloadWithPreview(text, recipientCount) {
     if (preview) return SidewordProtocol.textPayload(text, preview);
   } catch { /* Send the message without a preview. */ }
   return SidewordProtocol.textPayload(text);
+}
+
+// After sending a link whose preview was not ready: keep (or start) loading it for this message.
+function followUpLinkPreview(chatId, messageId, text, recipients) {
+  if (linkPreviewMode !== "on" || !linkPreviewsAvailable) return;
+  const link = (globalThis.SidewordLinks?.findLinks(text) || []).find(previewableLink);
+  if (!link) return;
+  const item = { chatId, messageId, recipientIds: recipients.map(recipient => recipient.public_id) };
+  if (linkPreviewResults.has(link.href)) {
+    // Finished while the message was being encrypted (or failed earlier): follow up now or skip.
+    const ready = linkPreviewResults.get(link.href);
+    if (ready) void sendLinkPreviewFollowUp(item, link, ready);
+    return;
+  }
+  const waiting = sentLinkPreviews.get(link.href) || [];
+  waiting.push(item);
+  sentLinkPreviews.set(link.href, waiting);
+  if (!linkPreviewPending.has(link.href) && !linkPreviewQueue.has(link.href)) {
+    linkPreviewQueue.set(link.href, { link });
+    scheduleLinkPreviewDrain();
+  }
+}
+
+// Sends the loaded preview to the original recipients, bound to the original message ID.
+// Best effort: the message itself is already delivered, so failures only skip the card.
+async function sendLinkPreviewFollowUp(item, link, preview) {
+  const chat = chats.find(candidate => candidate.id === item.chatId);
+  if (!chat || chat.closed_at || linkPreviewMode !== "on" || !identity?.publicId) return;
+  const recipients = chat.participants.filter(peer => item.recipientIds.includes(peer.public_id));
+  const previewPayload = recipients.length ? linkPreviewPayload(link, preview, recipients.length) : null;
+  if (!previewPayload) return;
+  try {
+    for (const recipient of recipients) await assertTrustedPeer(recipient);
+    await queueEncryptedMessage(chat, recipients, crypto.randomUUID(),
+      SidewordProtocol.linkPreviewPayload(item.messageId, previewPayload));
+    try { await flushOutbox(); }
+    finally { await renderOutbox(); }
+  } catch { /* The message was sent; only its preview is skipped. */ }
 }
 
 function linkPreviewPart(tag, className, text) {
@@ -1957,6 +2022,38 @@ function showLinkPreview(message, link, preview) {
   placeLinkCard(message, link, createLinkCard(link, preview));
 }
 
+// A preview that arrives after its message fades in while the bubble eases to its new size;
+// offscreen or with reduced motion it appears at once without moving the reading position.
+function revealLinkPreview(message, link, preview) {
+  if (reducedMotion() || !messageInView(message)) {
+    keepScrollPosition(() => showLinkPreview(message, link, preview));
+    return;
+  }
+  const bubble = message.messageBubble;
+  for (const animation of bubble.getAnimations?.() || []) animation.finish();
+  const before = bubble.getBoundingClientRect();
+  showLinkPreview(message, link, preview);
+  const after = bubble.getBoundingClientRect();
+  const timing = { duration: LINK_CARD_ANIMATION_MS, easing: "cubic-bezier(.2, 0, 0, 1)" };
+  // Animate real sizes, not a scale transform, so text never distorts; no fill is kept.
+  if (Math.abs(before.width - after.width) >= 1 || Math.abs(before.height - after.height) >= 1) {
+    bubble.animate?.([{ width: `${before.width}px`, height: `${before.height}px`, overflow: "hidden" },
+      { width: `${after.width}px`, height: `${after.height}px`, overflow: "hidden" }], timing);
+  }
+  message.linkCard?.animate?.([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }],
+    { duration: LINK_CARD_ANIMATION_MS, easing: "ease-out" });
+}
+
+function reducedMotion() {
+  return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+}
+
+function messageInView(message) {
+  const bubble = message.messageBubble.getBoundingClientRect();
+  const list = elements.messageList.getBoundingClientRect();
+  return bubble.bottom > list.top && bubble.top < list.bottom;
+}
+
 // Keeps the first visible message in place when content above it changes size; following the
 // latest message is already handled by the resize observer. Works without CSS scroll anchoring.
 function keepScrollPosition(change) {
@@ -1996,6 +2093,7 @@ function resetLinkPreviewRequests() {
   linkPreviewPending.clear();
   linkPreviewResults.clear();
   draftLinkPreviews.clear();
+  sentLinkPreviews.clear();
   window.clearTimeout(draftPrefetchTimer);
 }
 
@@ -2019,9 +2117,11 @@ function prefetchLinkPreview(link) {
   scheduleLinkPreviewDrain();
 }
 
-// Removed before sending: forget the result and cancel the request.
+// Removed before sending: forget the result and cancel the request, unless a sent message
+// still waits for this preview.
 function discardDraftLinkPreview(href) {
   draftLinkPreviews.delete(href);
+  if (sentLinkPreviews.has(href)) return;
   linkPreviewResults.delete(href);
   linkPreviewQueue.delete(href);
   linkPreviewPending.get(href)?.controller?.abort();
@@ -2453,6 +2553,11 @@ async function processMessages(messages) {
         delivery: deliveryReference(message, "sender_public_id"),
       };
       entry.meta = messageMeta(message.chat_id, entry);
+      if (payload.type === "link-preview") {
+        // Bound to the sender by construction: the target key includes this message's sender.
+        Object.assign(entry, { kind: "link_preview", target: messageKey({ chat_id: message.chat_id,
+          sender_public_id: message.sender_public_id, client_message_id: payload.target }) });
+      }
       await appendMessage(message.chat_id, entry);
       seenMessageIds.add(key);
       failedMessageReasons.delete(key);
@@ -2918,7 +3023,7 @@ elements.activationForm.addEventListener("submit", async (event) => {
       // Persisted history/outbox are scoped by public ID. Keep them for a later
       // reconnect; a new invite must never perform a destructive device reset.
       messagesByChat.clear();
-      receivedMedia.clear();
+      receivedMedia.clear(); receivedPreviews.clear();
       revealedImages.clear();
       mediaUploadStates.clear();
       seenMessageIds.clear();
@@ -3004,7 +3109,8 @@ async function renderOutbox() {
           || mediaFailures.get(stored.key)?.attempts >= 6 ? "Could not send" : null;
       if (!state) continue; // Normal background delivery needs no recovery panel.
       const payload = SidewordProtocol.validatePayload(record.payload);
-      row.textContent = `${state}: ${payload.type === "text" ? payload.text : "Attachment"} `;
+      row.textContent = `${state}: ${payload.type === "text" ? payload.text
+        : payload.type === "link-preview" ? "Link preview" : "Attachment"} `;
     } catch { row.textContent = "Could not read a saved message. "; }
     const discard = document.createElement("button");
     discard.type = "button";
@@ -3114,6 +3220,7 @@ async function storeOutgoing(record) {
     createdAt: record.createdAt };
   entry.meta = messageMeta(record.chatId, entry);
   if (record.media) entry.attachment = SidewordProtocol.validatePayload(record.media);
+  if (record.payload.type === "link-preview") Object.assign(entry, { kind: "link_preview", target: `outgoing:${record.payload.target}` });
   await appendMessage(record.chatId, entry);
 }
 
@@ -3168,6 +3275,7 @@ async function recoverMessageStatuses() {
 
 function payloadEntry(payload) {
   if (payload.type === "attachment" || payload.type === "attachment-ref") return { attachment: payload, text: payload.text || "" };
+  if (payload.type === "link-preview") return { preview: payload.preview };
   return payload.preview ? { text: payload.text, preview: payload.preview } : { text: payload.text };
 }
 
@@ -3453,43 +3561,14 @@ elements.messageForm.addEventListener("submit", async (event) => {
     }
     const payload = file ? SidewordProtocol.fileReference(file.name, file.type, file.size, `${messageId}.media`, text)
       : textPayloadWithPreview(text, recipients.length);
-    const plaintext = SidewordProtocol.encodePayload(payload);
-    const envelopes = [];
-    let wireBytes = 512;
-    // Sequential encryption bounds transient buffers independently of group size.
-    for (const recipient of recipients) {
-      const ciphertext = await encryptForRecipient(plaintext, chat.id, messageId, recipient);
-      wireBytes += ciphertext.length + 512;
-      if (wireBytes > SidewordProtocol.MAX_SEND_BYTES) throw new ClientError("This message exceeds the group transport limit.");
-      envelopes.push({ recipient_public_id: recipient.public_id, ciphertext });
-    }
-    if (encoder.encode(JSON.stringify({ client_message_id: messageId, envelopes })).length > SidewordProtocol.MAX_SEND_BYTES) {
-      throw new ClientError("This message exceeds the group transport limit. Use a smaller message or fewer recipients.");
-    }
-    if (!identity.retryWindowSeconds) throw new ClientError("The server does not advertise a safe message retry period. This message was not uploaded.");
-    const record = { chatId: chat.id, messageId, envelopes, payload,
-      expiresAt: Date.now() + Math.max(0, identity.retryWindowSeconds - 300) * 1000,
-      createdAt: Date.now() };
-    if (file) record.media = SidewordProtocol.filePayload(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
-    await deviceLock(`outbox:${identity.publicId}`, async () => {
-      await deviceLock(`outbox-capacity:${identity.publicId}`, async () => {
-        const records = [...await readHistoryRecords(`outbox:${identity.publicId}:`),
-          ...await readHistoryRecords(`mediaoutbox:${identity.publicId}:`)];
-        const bytes = records.reduce((sum, item) => sum + item.value.ciphertext.byteLength, 0);
-        if (records.length >= 100 || bytes + encoder.encode(JSON.stringify(record)).length + 16
-            > (file ? 16 : 32) * 1024 * 1024) {
-          throw new ClientError("The encrypted local outbox is full. Retry or discard pending sends before adding another message.");
-        }
-        await persistOutbox(record);
-      });
+    await queueEncryptedMessage(chat, recipients, messageId, payload, { file, onQueued: () => {
       // Ownership transfers to the durable outbox even if subsequent history persistence fails.
       if (file) clearAttachment();
-      // A prefetched preview stays tracked until the sent message renders from it; later draft
-      // edits skip addresses that rendered messages use.
       window.clearTimeout(draftPrefetchTimer);
       elements.messageInput.value = "";
-      await storeOutgoing(record);
-    });
+    } });
+    // Not ready yet: the preview follows in its own encrypted message once loaded.
+    if (!file && !payload.preview) followUpLinkPreview(chat.id, messageId, text, recipients);
     try { await flushOutbox(); }
     finally { await renderOutbox(); }
   } catch (error) {
@@ -3501,6 +3580,44 @@ elements.messageForm.addEventListener("submit", async (event) => {
     if (!elements.messageInput.disabled) elements.messageInput.focus({ preventScroll: true });
   }
 });
+
+// Encrypts one payload per recipient, checks transport limits and stores it in the durable
+// encrypted outbox. onQueued runs once the outbox owns the message.
+async function queueEncryptedMessage(chat, recipients, messageId, payload, { file = null, onQueued = null } = {}) {
+  const plaintext = SidewordProtocol.encodePayload(payload);
+  const envelopes = [];
+  let wireBytes = 512;
+  // Sequential encryption bounds transient buffers independently of group size.
+  for (const recipient of recipients) {
+    const ciphertext = await encryptForRecipient(plaintext, chat.id, messageId, recipient);
+    wireBytes += ciphertext.length + 512;
+    if (wireBytes > SidewordProtocol.MAX_SEND_BYTES) throw new ClientError("This message exceeds the group transport limit.");
+    envelopes.push({ recipient_public_id: recipient.public_id, ciphertext });
+  }
+  if (encoder.encode(JSON.stringify({ client_message_id: messageId, envelopes })).length > SidewordProtocol.MAX_SEND_BYTES) {
+    throw new ClientError("This message exceeds the group transport limit. Use a smaller message or fewer recipients.");
+  }
+  if (!identity.retryWindowSeconds) throw new ClientError("The server does not advertise a safe message retry period. This message was not uploaded.");
+  const record = { chatId: chat.id, messageId, envelopes, payload,
+    expiresAt: Date.now() + Math.max(0, identity.retryWindowSeconds - 300) * 1000,
+    createdAt: Date.now() };
+  if (file) record.media = SidewordProtocol.filePayload(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
+  await deviceLock(`outbox:${identity.publicId}`, async () => {
+    await deviceLock(`outbox-capacity:${identity.publicId}`, async () => {
+      const records = [...await readHistoryRecords(`outbox:${identity.publicId}:`),
+        ...await readHistoryRecords(`mediaoutbox:${identity.publicId}:`)];
+      const bytes = records.reduce((sum, item) => sum + item.value.ciphertext.byteLength, 0);
+      if (records.length >= 100 || bytes + encoder.encode(JSON.stringify(record)).length + 16
+          > (file ? 16 : 32) * 1024 * 1024) {
+        throw new ClientError("The encrypted local outbox is full. Retry or discard pending sends before adding another message.");
+      }
+      await persistOutbox(record);
+    });
+    onQueued?.();
+    await storeOutgoing(record);
+  });
+  return record;
+}
 
 elements.refreshButton.addEventListener("click", refresh);
 document.querySelector("#reconnect-session").addEventListener("click", async (event) => {
