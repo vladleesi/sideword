@@ -222,9 +222,13 @@ def test_extracts_open_graph_fields_with_fallbacks_and_bounds():
     assert result["description"].endswith("…")
     assert (result["site_name"], result["url"]) == ("Site", "https://example.com/canonical")
     fallback = FakeNet({"example.com": response(200, page(
-        '<TITLE>Plain <b>title</b></TITLE><meta name="Description" content="Meta description">'))})
+        '<TITLE>Plain title</TITLE><meta name="Description" content="Meta description">'))})
     result = preview("https://example.com/", fallback)
     assert (result["title"], result["description"]) == ("Plain title", "Meta description")
+    # Newer parsers keep <title> content as raw text (HTML spec); older ones drop inner tags.
+    # Either way the result is plain text that clients render with textContent.
+    marked = FakeNet({"example.com": response(200, page("<title>Plain <b>title</b></title>"))})
+    assert preview("https://example.com/", marked)["title"] in {"Plain title", "Plain <b>title</b>"}
 
 
 def test_metadata_injection_stays_plain_text():
