@@ -25,6 +25,7 @@ from .routers import (
     client,
     health,
     landing,
+    link_previews,
     links,
     me,
     sessions,
@@ -118,6 +119,7 @@ def create_app() -> FastAPI:
     app.include_router(me.router)
     app.include_router(sessions.router)
     app.include_router(chats.router)
+    app.include_router(link_previews.router)
     app.include_router(ws.router)
     app.include_router(client.router)
     app.include_router(admin_auth.router)

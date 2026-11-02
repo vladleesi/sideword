@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Sideword Server{% endblock %}
+{# The public server page keeps the shared product mark; admin pages use the admin palette. #}
+{% block icons %}
+<link rel="icon" href="/static/mark.svg?v=1" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
+{% endblock %}
+{% block brand_mark %}mark.svg{% endblock %}
 {% block content %}
 <section class="card center">
   <h1>Sideword</h1>

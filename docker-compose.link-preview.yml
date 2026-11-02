@@ -1,0 +1,48 @@
+# Opt-in isolated link-preview fetcher. Use only with the host egress firewall described in
+# docs/UPGRADING.md#link-preview-service:
+#   docker compose -f docker-compose.yml -f docker-compose.link-preview.yml up -d
+# Set SIDEWORD_LINK_PREVIEW_TOKEN (32+ random characters) in .env first.
+services:
+  sideword:
+    environment:
+      SIDEWORD_LINK_PREVIEW_SERVICE_URL: http://link-preview:8002
+    networks:
+      - default
+      - link-preview-internal
+
+  link-preview:
+    image: sideword-chat-server:latest
+    restart: unless-stopped
+    # No env_file, database, volumes or published ports: the service holds only its token.
+    environment:
+      SIDEWORD_LINK_PREVIEW_TOKEN: ${SIDEWORD_LINK_PREVIEW_TOKEN:?set SIDEWORD_LINK_PREVIEW_TOKEN in .env}
+    command: ["uvicorn", "--factory", "app.preview_service:create_preview_app",
+              "--host", "0.0.0.0", "--port", "8002", "--no-access-log",
+              "--log-level", "warning", "--limit-concurrency", "16", "--timeout-keep-alive", "5"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import http.client as h; c = h.HTTPConnection('127.0.0.1', 8002, timeout=3); c.request('GET', '/health'); raise SystemExit(c.getresponse().status != 200)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    pids_limit: 64
+    cpus: 0.5
+    networks:
+      - link-preview-internal
+      - link-preview-egress
+
+networks:
+  # Relay-to-service traffic only; no route outside the host.
+  link-preview-internal:
+    internal: true
+  # Outbound fetching; restrict it with host firewall rules on this fixed bridge and subnet.
+  link-preview-egress:
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: sw-preview0
+    ipam:
+      config:
+        - subnet: 172.30.250.0/24

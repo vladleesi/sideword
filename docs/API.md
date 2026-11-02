@@ -39,8 +39,9 @@ invite URLs, credentials and request bodies out of logs.
 
 ## Profile and chats
 
-- `GET /api/v1/me`: identity, all memberships, participant keys, retry/receipt windows
-  and session deadlines. Use `chat.participants[].display_name` for room names;
+- `GET /api/v1/me`: identity, all memberships, participant keys, retry/receipt windows,
+  session deadlines and `link_previews_available`. Use `chat.participants[].display_name`
+  for room names;
   top-level `user.display_name` is the initial account label.
 - `GET /api/v1/chats/{chat_id}`: authorized roster and nullable UTC `closed_at`.
   Nonmembers receive 404.
@@ -176,6 +177,16 @@ Server limits bound ciphertext/resources, not verified file size/type. Client li
 1 MiB decoded files and 16,000 UTF-8 text bytes. Four maximal file copies fit a send;
 larger groups need smaller files. See [encoding budget](PROTOCOL.md#encoding-and-resource-budget)
 and [.env.example](../.env.example) for other quotas/configuration.
+
+## Link previews
+
+`POST /api/v1/link-previews` with `{"url":"https://example.com/a"}` returns no-store JSON
+with nullable plain-text `title`, `description`, `site_name`, HTTPS `url` (`og:url`),
+`final_host` and `image` (`mime`, `width`, `height`, base64 `data` of a still JPEG/PNG/WebP
+up to 1 MiB). It returns 404 unless the [preview service](UPGRADING.md#link-preview-service)
+is configured, 422 for unsupported addresses (HTTPS on port 443 without credentials only),
+429 at the per-user rate or concurrency limit and 502/503 on failure. Treat all fields as
+untrusted.
 
 ## Renewable client sessions
 

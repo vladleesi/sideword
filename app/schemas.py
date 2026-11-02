@@ -87,6 +87,7 @@ class MeResponse(BaseModel):
     send_retry_window_seconds: int = 0
     receipt_retention_seconds: int = 0
     session_expires_at: datetime | None = None
+    link_previews_available: bool = False
 
 
 class MessageEnvelope(BaseModel):

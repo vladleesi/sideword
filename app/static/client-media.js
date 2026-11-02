@@ -287,7 +287,8 @@
 
   // Re-encodes an oversized still image as a smaller JPEG without metadata.
   // Returns validated bytes, or null when the source is unsupported or cannot fit.
-  async function reduceImage(bytes, mime, maxBytes, isCurrent = () => true) {
+  // maxDimension lets callers produce small thumbnails; it never exceeds preview limits.
+  async function reduceImage(bytes, mime, maxBytes, isCurrent = () => true, maxDimension = MAX_DIMENSION) {
     const source = sourceDimensions(bytes);
     if (!source || typeof mime !== "string" || (mime && !generic(mime) && mime.toLowerCase() !== source.mime)
         || bytes.length > MAX_SOURCE_BYTES || !(source.width > 0 && source.height > 0)
@@ -301,7 +302,8 @@
       const width = bitmap.width, height = bitmap.height;
       if (!isCurrent() || !(width > 0 && height > 0) || width * height > MAX_SOURCE_PIXELS) return null;
       // Start inside recipients' preview limits, then trade quality and size.
-      let scale = Math.min(1, MAX_DIMENSION / width, MAX_DIMENSION / height, Math.sqrt(MAX_PIXELS / (width * height)));
+      const side = Math.min(MAX_DIMENSION, maxDimension);
+      let scale = Math.min(1, side / width, side / height, Math.sqrt(MAX_PIXELS / (width * height)));
       const context = canvas.getContext("2d", { alpha: false });
       for (let attempt = 0; attempt < 8 && context; attempt++, scale *= .75) {
         canvas.width = Math.max(1, Math.floor(width * scale));

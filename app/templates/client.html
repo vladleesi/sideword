@@ -12,17 +12,18 @@
   <link rel="preload" href="/static/fonts/IBMPlexSans-SemiBold.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
   <script src="/static/appearance.js?v=2"></script>
-  <link rel="stylesheet" href="/static/client.css?v=34">
+  <link rel="stylesheet" href="/static/client.css?v=38">
   <script src="/static/client-protocol.js?v=5" defer></script>
-  <script src="/static/client-media.js?v=8" defer></script>
-  <script src="/static/client.js?v=49" defer></script>
+  <script src="/static/client-media.js?v=9" defer></script>
+  <script src="/static/client-links.js?v=2" defer></script>
+  <script src="/static/client.js?v=55" defer></script>
 </head>
 <body class="messenger">
   <a class="skip-link" href="#workspace">Skip to workspace</a>
   <header class="client-header">
     <div class="brand-line">
       <a class="client-brand" href="/client"><img src="/static/mark.svg?v=1" width="28" height="28" alt="">Sideword<span aria-hidden="true"> /</span></a>
-      <span class="test-badge">Test client · unaudited</span>
+      <span class="test-badge">Test client · unaudited · <span class="app-version">v{{ app_version }}</span></span>
     </div>
     <div class="header-controls">
       <span class="connection-label" role="status"><span id="connection-state" class="status-dot" aria-hidden="true"></span><span id="connection-label">Loading</span></span>
@@ -97,6 +98,8 @@
           <strong>Waiting for another participant</strong>
           <p>You're the only person in this conversation. You can send messages once someone else joins using a room invite.</p>
         </div>
+        <p id="external-link-note" class="sr-only">External link, opens in a new tab.</p>
+        <p id="suspicious-link-note" class="sr-only">Check this address before opening; it may imitate another site.</p>
         <div id="message-list" class="message-list" role="log" aria-live="polite" aria-label="Messages" tabindex="0">
           <p class="empty-state">Choose a conversation to view messages.</p>
         </div>
@@ -219,6 +222,13 @@
         <label><input id="image-previews-reveal" type="radio" name="image-previews" value="reveal">Click to reveal</label>
         <label><input id="image-previews-auto" type="radio" name="image-previews" value="auto" checked>Show automatically</label>
         <p id="image-previews-help" class="muted">JPEG, PNG and WebP previews are decoded only on this device. Other files stay downloads.</p>
+      </fieldset>
+      <fieldset class="appearance-controls" aria-describedby="link-previews-help link-previews-unavailable">
+        <legend>Link previews</legend>
+        <label><input id="link-previews-off" type="radio" name="link-previews" value="off" checked>Off</label>
+        <label><input id="link-previews-on" type="radio" name="link-previews" value="on">On</label>
+        <p id="link-previews-help" class="muted">When on, HTTPS links in opened chats are sent to this server's preview service to load a title and image. Messages stay encrypted; previews are kept only in this tab.</p>
+        <p id="link-previews-unavailable" class="muted">This server does not offer previews.</p>
       </fieldset>
       <section aria-labelledby="security-heading">
         <h3 id="security-heading">Security information</h3>

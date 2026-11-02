@@ -283,7 +283,7 @@ textarea:disabled { color: var(--muted); }
 .composer.has-attachment #send-button { grid-column: 3; grid-row: 2; align-self: center; }
 /* One compact attachment card below an optional text message. */
 /* No row gap: hidden text/error rows must not add space, so sender and receiver cards match. */
-.attachment-card { display: grid; grid-template-columns: 28px minmax(0, 1fr) 32px; align-items: center; gap: 0 .4rem; width: 16.5rem; max-width: 100%; padding: .4rem; border: 1px solid var(--border); border-radius: 6px; }
+.attachment-card { display: grid; grid-template-columns: 28px minmax(0, 1fr) 32px; align-items: center; gap: 0 .4rem; width: fit-content; min-width: 16.5rem; max-width: 100%; padding: .4rem; border: 1px solid var(--border); border-radius: 6px; }
 .attachment-card > .message-content { grid-column: 1 / -1; grid-row: 1; margin-bottom: .4rem; }
 .attachment-card > .message-content[hidden] { display: none; }
 .attachment-card .file-tile { grid-column: 1; grid-row: 2; width: 28px; height: 32px; }
@@ -307,7 +307,6 @@ textarea:disabled { color: var(--muted); }
   .composer.has-attachment #attachment-preview { grid-column: 1 / -1; grid-row: 1; }
   .composer.has-attachment #attachment-button, .composer.has-attachment #send-button { grid-row: 2; }
   .attachment-selection { padding: .6rem; }
-  .attachment-card { width: 16.5rem; }
 }
 @media (forced-colors: active) {
   .file-tile, #attachment-button, .attachment-card .attachment-download { border-color: ButtonText; }
@@ -317,7 +316,8 @@ textarea:disabled { color: var(--muted); }
 .conversation.file-drag-over { outline: 2px dashed var(--accent); outline-offset: -5px; }
 .conversation.file-drag-over .composer { background: var(--surface); }
 
-.attachment-card .media-preview { grid-column: 1 / -1; grid-row: 3; margin-top: .4rem; min-width: 0; min-height: 0; width: 100%; max-height: 180px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+/* Width 0 plus min-width 100%: media fills the card but never widens it beyond the caption. */
+.attachment-card .media-preview { grid-column: 1 / -1; grid-row: 3; margin-top: .4rem; min-height: 0; width: 0; min-width: 100%; max-height: 180px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .media-preview:empty { display: none; }
 .media-status { display: block; color: var(--muted); font-size: .75rem; }
 .media-frame { height: 180px; }
@@ -359,3 +359,31 @@ textarea:disabled { color: var(--muted); }
   .image-stage { padding: .25rem; }
 }
 @media (forced-colors: active) { .media-open:focus-visible, .image-stage:focus-visible { outline-color: Highlight; } }
+
+/* Links stay inline message text; cards are local, compact and never fetch remote content. */
+.message-link { color: inherit; text-decoration: underline; text-decoration-color: var(--control-border); text-underline-offset: .15em; }
+.message-link:hover { text-decoration-color: currentColor; }
+.message-link::after { content: "\2197"; content: "\2197" / ""; margin-left: .1em; color: var(--muted); font-size: .8em; }
+.message-link.suspicious-link { text-decoration-style: wavy; text-decoration-color: var(--danger); }
+.message-link:focus-visible, .link-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Compact preview card: clamped text (title 3, description 4 lines), fixed image boxes. */
+/* Contributes 20rem to the bubble width, then fills the bubble when the text is wider. */
+.link-card { display: block; width: 20rem; min-width: 100%; max-width: 100%; margin-top: .45rem; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-family: var(--sans); text-decoration: none; }
+.link-card:hover { border-color: var(--control-border); }
+.link-card.suspicious-link { border-color: var(--danger); }
+.link-card-banner { display: block; width: 100%; aspect-ratio: 1.91 / 1; object-fit: cover; background: var(--surface); border-bottom: 1px solid var(--border); }
+.link-card-body { display: flex; align-items: flex-start; gap: .6rem; padding: .5rem .65rem .55rem; }
+.link-card-text { display: flex; flex: 1; flex-direction: column; gap: .1rem; min-width: 0; }
+.link-card-thumbnail { flex-shrink: 0; width: 56px; height: 56px; border-radius: 4px; object-fit: cover; background: var(--surface); }
+.link-card-source, .link-card-title, .link-card-description { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.link-card-source { -webkit-line-clamp: 1; line-clamp: 1; color: var(--muted); font-size: .6875rem; line-height: 1.4; }
+.link-card-title { -webkit-line-clamp: 3; line-clamp: 3; font-size: .8125rem; font-weight: 600; line-height: 1.3; }
+.link-card-description { -webkit-line-clamp: 4; line-clamp: 4; color: var(--muted); font-size: .75rem; line-height: 1.35; }
+.link-warning { display: block; margin-top: .3rem; color: var(--danger); font-size: .75rem; overflow-wrap: anywhere; }
+/* With a card or warning, the status moves below it instead of covering it. */
+.message.mine .has-link-extras > .message-content::after { display: none; }
+.has-link-extras > .message-footer { position: static; margin-top: .2rem; }
+@media (forced-colors: active) {
+  .link-card { border-color: LinkText; }
+  .link-card.suspicious-link, .link-warning { border-color: CanvasText; color: CanvasText; }
+}

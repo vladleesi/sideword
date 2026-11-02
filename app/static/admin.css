@@ -57,6 +57,13 @@ a:hover { text-decoration: underline; }
   letter-spacing: .02em;
 }
 
+.topbar .app-version {
+  margin-left: -1rem;
+  color: var(--muted);
+  font-size: .75rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .topbar nav {
   display: flex;
   gap: 1.1rem;

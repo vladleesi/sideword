@@ -12,6 +12,14 @@ const POLL_INTERVAL_MS = 4000;
 const REQUEST_TIMEOUT_MS = 15000;
 // Local display preference only; it never changes delivery, receipts or stored history.
 const IMAGE_PREVIEW_KEY = "sideword-client-image-previews";
+// Link previews are off until chosen on this device; when on, rendered links load previews.
+const LINK_PREVIEW_KEY = "sideword-client-link-previews";
+const LINK_PREVIEW_CACHE_SIZE = 50;
+const LINK_PREVIEW_RETRY_MS = 10000;
+const LINK_PREVIEW_PARALLEL = 3;
+// Wide images become a banner; others a small square thumbnail.
+const LINK_BANNER = { bytes: 96 * 1024, dimension: 640 };
+const LINK_THUMBNAIL = { bytes: 24 * 1024, dimension: 160 };
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const VIEWER_ZOOM_LEVELS = [1, 1.5, 2, 3, 4];
 const encoder = new TextEncoder();
@@ -59,6 +67,9 @@ const elements = {
   status: document.querySelector("#status-message"),
   imagePreviewReveal: document.querySelector("#image-previews-reveal"),
   imagePreviewAuto: document.querySelector("#image-previews-auto"),
+  linkPreviewsOff: document.querySelector("#link-previews-off"),
+  linkPreviewsOn: document.querySelector("#link-previews-on"),
+  linkPreviewsUnavailable: document.querySelector("#link-previews-unavailable"),
   imageViewer: document.querySelector("#image-viewer"),
   imageStage: document.querySelector("#image-stage"),
   imageViewerStatus: document.querySelector("#image-viewer-status"),
@@ -83,6 +94,16 @@ const mediaUploadStates = new Map();
 let mediaTimer = null;
 let previewTimer = null;
 let imagePreviewMode = readImagePreviewMode();
+let linkPreviewMode = readLinkPreviewMode();
+let linkPreviewsAvailable = false;
+// Memory only: href -> checked preview or null after failure; never uploaded or persisted.
+const linkPreviewResults = new Map();
+// href -> { link, messages }: queued, or in flight; Blob URLs are owned per message.
+const linkPreviewQueue = new Map();
+const linkPreviewPending = new Map();
+const linkPreviewUrls = new Map();
+let linkPreviewGeneration = 0;
+let linkPreviewDrainScheduled = false;
 // In-memory reveals only: reload returns incoming images to the selected privacy mode.
 const revealedImages = new Set();
 let requestedPreview = null;
@@ -234,8 +255,17 @@ elements.imagePreviewReveal.addEventListener("change", () => {
 elements.imagePreviewAuto.addEventListener("change", () => {
   if (elements.imagePreviewAuto.checked) applyImagePreviewMode("auto", true);
 });
+elements.linkPreviewsOff.checked = linkPreviewMode === "off";
+elements.linkPreviewsOn.checked = linkPreviewMode === "on";
+elements.linkPreviewsOff.addEventListener("change", () => {
+  if (elements.linkPreviewsOff.checked) applyLinkPreviewMode("off", true);
+});
+elements.linkPreviewsOn.addEventListener("change", () => {
+  if (elements.linkPreviewsOn.checked) applyLinkPreviewMode("on", true);
+});
 window.addEventListener("storage", event => {
   if (event.key === IMAGE_PREVIEW_KEY || event.key === null) applyImagePreviewMode(readImagePreviewMode());
+  if (event.key === LINK_PREVIEW_KEY || event.key === null) applyLinkPreviewMode(readLinkPreviewMode());
 });
 elements.deviceDialog.addEventListener("close", refreshVisibleReads);
 
@@ -832,6 +862,8 @@ class SessionExpiredError extends ClientError {}
 
 async function invalidateSession(reason = "Session expired") {
   mediaPreviews?.clear();
+  releaseAllLinkPreviews();
+  resetLinkPreviewRequests();
   if (elements.imageViewer.open) elements.imageViewer.close();
   stopMediaTransfers();
   if (!identity) return;
@@ -1410,6 +1442,8 @@ function renderMessages(openAtLatest = false) {
   list.setAttribute("data-follow-latest", String(followLatest));
   if (changedChat) {
     mediaPreviews?.clear();
+    releaseAllLinkPreviews();
+    linkPreviewQueue.clear();
     messageVisibilityObserver?.disconnect();
     visibleMessageNodes.clear();
     refreshVisibleReads();
@@ -1425,6 +1459,7 @@ function renderMessages(openAtLatest = false) {
     });
   if (!entries.length) {
     mediaPreviews?.clear();
+    releaseAllLinkPreviews();
     if (list.firstChild && !renderedMessages.size) return;
     for (const node of renderedMessages.values()) messageResizeObserver?.unobserve(node.messageBubble);
     list.replaceChildren();
@@ -1440,6 +1475,7 @@ function renderMessages(openAtLatest = false) {
   for (const [key, node] of renderedMessages) {
     if (!keys.has(key)) {
       node.releaseMedia?.();
+      releaseLinkPreview(node);
       messageResizeObserver?.unobserve(node.messageBubble);
       node.remove();
       messageVisibilityObserver?.unobserve(node);
@@ -1456,8 +1492,8 @@ function renderMessages(openAtLatest = false) {
     const previous = entries[position - 1];
     const existing = renderedMessages.get(key);
     if (existing) {
-      if (existing.messageContent.textContent !== messageTextContent) existing.messageContent.textContent = messageTextContent;
       existing.messageEntry = entry;
+      if (existing.messageText !== messageTextContent) renderMessageText(existing, messageTextContent);
       if (entry.attachment) updateAttachmentCard(existing);
       updateMessageHeader(existing, selectedChatId, entry, previous, timestampFormatters);
       if (list.children[position] !== existing) list.insertBefore(existing, list.children[position] || null);
@@ -1488,7 +1524,6 @@ function renderMessages(openAtLatest = false) {
     message.messageBubble = bubble;
     const text = document.createElement("span");
     text.className = "message-content";
-    text.textContent = messageTextContent;
     message.messageContent = text;
     bubble.append(text);
     if (entry.attachment) {
@@ -1532,6 +1567,7 @@ function renderMessages(openAtLatest = false) {
       message.attachmentUi = { state, download, preview };
       updateAttachmentCard(message);
     }
+    renderMessageText(message, messageTextContent);
     message.append(bubble);
     messageResizeObserver?.observe(bubble);
     updateMessageHeader(message, chatId, entry, previous, timestampFormatters);
@@ -1539,7 +1575,8 @@ function renderMessages(openAtLatest = false) {
       message.tabIndex = 0;
       message.setAttribute("aria-haspopup", "dialog");
       message.addEventListener("click", event => {
-        if (event.target?.tagName === "BUTTON" || window.getSelection()?.toString()) return;
+        if (event.target?.tagName === "BUTTON" || event.target?.closest?.("a, button")
+          || window.getSelection()?.toString()) return;
         showMessageDetails(chatId, entry, message);
       });
       message.addEventListener("keydown", event => {
@@ -1636,6 +1673,281 @@ function updateAttachmentCard(node) {
     ui.preview.className = "media-preview";
     ui.preview.replaceChildren(ui.reveal);
   }
+}
+
+// Decrypted text stays text: links are DOM anchors whose visible text is the exact typed substring.
+function renderMessageText(message, messageText) {
+  const content = message.messageContent;
+  const links = message.messageEntry.kind === "system" ? [] : globalThis.SidewordLinks?.findLinks(messageText) || [];
+  message.messageText = messageText;
+  message.messageLinks = links;
+  if (!links.length) content.textContent = messageText;
+  else {
+    const parts = [];
+    let offset = 0;
+    for (const link of links) {
+      if (link.start > offset) parts.push(messageText.slice(offset, link.start));
+      parts.push(messageLink(link));
+      offset = link.end;
+    }
+    if (offset < messageText.length) parts.push(messageText.slice(offset));
+    content.replaceChildren(...parts);
+  }
+  updateLinkWarning(message);
+  updateLinkPreview(message);
+}
+
+function externalLinkAttributes(anchor, link) {
+  anchor.href = link.href;
+  anchor.setAttribute("target", "_blank");
+  anchor.setAttribute("rel", "noopener noreferrer nofollow");
+  anchor.setAttribute("referrerpolicy", "no-referrer");
+  anchor.title = `${link.warnings.length ? `Check before opening: ${link.warnings.join("; ")}. ` : ""}`
+    + `Opens in a new tab: ${link.href}`;
+}
+
+function messageLink(link) {
+  const anchor = document.createElement("a");
+  anchor.className = link.warnings.length ? "message-link suspicious-link" : "message-link";
+  externalLinkAttributes(anchor, link);
+  anchor.setAttribute("aria-describedby", link.warnings.length
+    ? "external-link-note suspicious-link-note" : "external-link-note");
+  anchor.textContent = link.text;
+  return anchor;
+}
+
+// Suspicious hosts get a short inline note under the text, independent of previews.
+function updateLinkWarning(message) {
+  const link = (message.messageLinks || []).find(candidate => candidate.warnings.length);
+  const text = link ? `Check ${link.host}: ${link.warnings.join("; ")}` : "";
+  if ((message.linkWarning?.textContent || "") === text) return;
+  message.linkWarning?.remove();
+  message.linkWarning = null;
+  if (text) {
+    message.linkWarning = document.createElement("span");
+    message.linkWarning.className = "link-warning";
+    message.linkWarning.textContent = text;
+    message.messageContent.after(message.linkWarning);
+  }
+  updateLinkLayout(message);
+}
+
+function updateLinkLayout(message) {
+  message.messageBubble.classList.toggle("has-link-extras", Boolean(message.linkWarning || message.linkCard));
+}
+
+function previewableLink(link) {
+  return link.protocol === "https:" && !link.port && !link.credentials;
+}
+
+// One preview per message for its first previewable link; nothing renders unless it loads.
+function updateLinkPreview(message) {
+  const link = linkPreviewMode === "on" && linkPreviewsAvailable && !message.messageEntry.attachment
+    ? (message.messageLinks || []).find(previewableLink) : null;
+  const key = link?.href || "";
+  if ((message.linkPreviewKey || "") === key) return;
+  releaseLinkPreview(message);
+  message.linkPreviewKey = key;
+  if (!link) return;
+  if (linkPreviewResults.has(key)) {
+    const preview = linkPreviewResults.get(key);
+    if (preview) showLinkPreview(message, link, preview);
+    return;
+  }
+  const waiting = linkPreviewPending.get(key) || linkPreviewQueue.get(key) || { link, messages: new Set() };
+  waiting.messages.add(message);
+  if (linkPreviewPending.has(key)) return;
+  // Re-inserting keeps the newest request last, so recently rendered links load first.
+  linkPreviewQueue.delete(key);
+  linkPreviewQueue.set(key, waiting);
+  // Start after the current render has queued all its links, so the newest load first.
+  if (!linkPreviewDrainScheduled) {
+    linkPreviewDrainScheduled = true;
+    void Promise.resolve().then(() => { linkPreviewDrainScheduled = false; drainLinkPreviews(); });
+  }
+}
+
+// Bounded parallel loading, newest first; one request per address even with many messages.
+function drainLinkPreviews() {
+  while (linkPreviewPending.size < LINK_PREVIEW_PARALLEL && linkPreviewQueue.size && linkPreviewMode === "on") {
+    const [key, waiting] = [...linkPreviewQueue].at(-1);
+    linkPreviewQueue.delete(key);
+    if (![...waiting.messages].some(message => message.linkPreviewKey === key)) continue;
+    linkPreviewPending.set(key, waiting);
+    void loadLinkPreview(key, waiting);
+  }
+}
+
+async function loadLinkPreview(key, waiting) {
+  const generation = linkPreviewGeneration;
+  try {
+    const preview = await fetchLinkPreview(waiting.link);
+    if (generation !== linkPreviewGeneration) return; // Turned off or session changed meanwhile.
+    rememberLinkPreview(key, preview);
+    if (!preview) return;
+    for (const message of waiting.messages) {
+      if (message.linkPreviewKey === key) showLinkPreview(message, waiting.link, preview);
+    }
+  } finally {
+    if (linkPreviewPending.get(key) === waiting) linkPreviewPending.delete(key);
+    drainLinkPreviews();
+  }
+}
+
+// Failures return null, so the message keeps only its inline link.
+async function fetchLinkPreview(link) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const result = await api("/api/v1/link-previews", { method: "POST", body: JSON.stringify({ url: link.href }) });
+      const preview = checkedLinkPreview(result);
+      if (preview) preview.image = await linkPreviewImage(result.image);
+      return preview;
+    } catch (error) {
+      if (!/\(HTTP 429\)/u.test(error?.message || "") || attempt === 2) return null;
+      await new Promise(resolve => window.setTimeout(resolve, LINK_PREVIEW_RETRY_MS * (attempt + 1)));
+    }
+  }
+  return null;
+}
+
+function checkedLinkPreview(result) {
+  if (!result || typeof result !== "object") return null;
+  const text = (value, limit) => typeof value === "string" && value.trim() ? value.trim().slice(0, limit) : null;
+  const finalHost = typeof result.final_host === "string" && /^[a-z0-9.:-]{1,253}$/u.test(result.final_host)
+    ? result.final_host : null;
+  const preview = { title: text(result.title, 200), description: text(result.description, 400),
+    siteName: text(result.site_name, 80), finalHost, image: null };
+  // Many sites repeat the description inside the title ("Site - name: description"): keep the
+  // title's own part and show the description once with more room.
+  const normalized = value => value?.toLocaleLowerCase().replace(/\s+/gu, " ");
+  const description = normalized(preview.description);
+  const prefix = description?.slice(0, Math.min(40, Math.max(12, Math.floor(description.length * .6))));
+  const repeatedAt = preview.title && prefix ? normalized(preview.title).indexOf(prefix) : -1;
+  if (repeatedAt > 0) {
+    const title = preview.title.replace(/\s+/gu, " ");
+    let end = repeatedAt;
+    while (end > 0 && " :|·•–—-".includes(title[end - 1])) end--; // Drop the joining punctuation.
+    preview.title = title.slice(0, end) || preview.title;
+  } else if (repeatedAt === 0) preview.description = null;
+  return preview.title || preview.description || result.image ? preview : null;
+}
+
+// Remote bytes are revalidated and re-encoded locally; only the small JPEG is kept.
+async function linkPreviewImage(image) {
+  const media = globalThis.SidewordMedia;
+  if (!media || !image || typeof image.data !== "string" || !IMAGE_TYPES.includes(image.mime)
+      || image.data.length > Math.ceil(media.MAX_BYTES / 3) * 4) return null;
+  try {
+    const bytes = SidewordProtocol.base64ToBytes(image.data);
+    const info = media.inspect(bytes, image.mime);
+    if (!info) return null;
+    const banner = info.width >= 300 && info.width / info.height >= 1.3;
+    const size = banner ? LINK_BANNER : LINK_THUMBNAIL;
+    const reduced = await media.reduceImage(bytes, image.mime, size.bytes, () => linkPreviewMode === "on", size.dimension);
+    return reduced ? { bytes: reduced, banner } : null;
+  } catch { return null; }
+}
+
+function rememberLinkPreview(href, preview) {
+  linkPreviewResults.delete(href);
+  linkPreviewResults.set(href, preview);
+  while (linkPreviewResults.size > LINK_PREVIEW_CACHE_SIZE) linkPreviewResults.delete(linkPreviewResults.keys().next().value);
+}
+
+function linkPreviewPart(tag, className, text) {
+  const node = document.createElement(tag);
+  node.className = className;
+  if (text) node.textContent = text;
+  return node;
+}
+
+// Compact card: optional banner, host and site line, title, description and side thumbnail.
+function showLinkPreview(message, link, preview) {
+  releaseLinkPreview(message);
+  message.linkPreviewKey = link.href;
+  const card = document.createElement("a");
+  card.className = link.warnings.length ? "link-card suspicious-link" : "link-card";
+  externalLinkAttributes(card, link);
+  // The inline link is the keyboard target; the card is an equivalent pointer target.
+  card.tabIndex = -1;
+  let url = null;
+  if (preview.image) {
+    url = URL.createObjectURL(new Blob([preview.image.bytes], { type: "image/jpeg" }));
+    linkPreviewUrls.set(message, url);
+  }
+  const image = className => {
+    const node = linkPreviewPart("img", className);
+    node.alt = "";
+    node.decoding = "async";
+    node.src = url;
+    return node;
+  };
+  if (url && preview.image.banner) card.append(image("link-card-banner"));
+  const body = linkPreviewPart("span", "link-card-body");
+  const text = linkPreviewPart("span", "link-card-text");
+  const host = link.displayHost.replace(/^www\./u, "");
+  const via = preview.finalHost && preview.finalHost !== link.host ? ` → ${preview.finalHost}` : "";
+  // Skip a site name that only restates the host, such as "GitHub" for github.com.
+  const siteKey = preview.siteName?.toLowerCase().replace(/[\s.]+/gu, "");
+  const redundant = !siteKey || host.split(".").includes(siteKey) || host.replaceAll(".", "") === siteKey;
+  const source = [`${host}${via}`, redundant ? null : preview.siteName];
+  text.append(linkPreviewPart("span", "link-card-source", source.filter(Boolean).join(" · ")));
+  if (preview.title) text.append(linkPreviewPart("span", "link-card-title", preview.title));
+  if (preview.description) text.append(linkPreviewPart("span", "link-card-description", preview.description));
+  body.append(text);
+  if (url && !preview.image.banner) body.append(image("link-card-thumbnail"));
+  card.append(body);
+  message.linkCard = card;
+  (message.linkWarning || message.messageContent).after(card);
+  updateLinkLayout(message);
+}
+
+function releaseLinkPreview(message) {
+  const url = linkPreviewUrls.get(message);
+  if (url) {
+    linkPreviewUrls.delete(message);
+    URL.revokeObjectURL(url);
+  }
+  message.linkPreviewKey = "";
+  if (!message.linkCard) return;
+  message.linkCard.remove();
+  message.linkCard = null;
+  updateLinkLayout(message);
+}
+
+function releaseAllLinkPreviews() {
+  for (const message of renderedMessages.values()) releaseLinkPreview(message);
+  for (const message of [...linkPreviewUrls.keys()]) releaseLinkPreview(message);
+}
+
+function resetLinkPreviewRequests() {
+  linkPreviewGeneration++;
+  linkPreviewQueue.clear();
+  linkPreviewPending.clear();
+  linkPreviewResults.clear();
+}
+
+function readLinkPreviewMode() {
+  try { return window.localStorage.getItem(LINK_PREVIEW_KEY) === "on" ? "on" : "off"; }
+  catch { return "off"; } // Unavailable storage keeps previews off.
+}
+
+function applyLinkPreviewMode(mode, save = false) {
+  linkPreviewMode = mode === "on" ? "on" : "off";
+  elements.linkPreviewsOff.checked = linkPreviewMode === "off";
+  elements.linkPreviewsOn.checked = linkPreviewMode === "on";
+  if (save) {
+    try { window.localStorage.setItem(LINK_PREVIEW_KEY, linkPreviewMode); }
+    catch { /* The visible choice still applies for this page. */ }
+  }
+  if (linkPreviewMode === "off") { releaseAllLinkPreviews(); resetLinkPreviewRequests(); }
+  for (const node of renderedMessages.values()) updateLinkPreview(node);
+}
+
+function setLinkPreviewsAvailable(available) {
+  linkPreviewsAvailable = available;
+  elements.linkPreviewsUnavailable.hidden = available;
+  for (const node of renderedMessages.values()) updateLinkPreview(node);
 }
 
 function readImagePreviewMode() {
@@ -1911,6 +2223,7 @@ async function loadChats() {
     throw new ClientError("The service returned incomplete message retention information.");
   }
   identity.receiptRetentionSeconds = data.receipt_retention_seconds;
+  setLinkPreviewsAvailable(data.link_previews_available === true);
   messageProfileReady = true;
   await writeIdentity(identity);
   chats = checkedChats;
@@ -3160,6 +3473,7 @@ window.addEventListener("online", () => {
 window.addEventListener("offline", disconnectSocket);
 window.addEventListener("pagehide", () => {
   mediaPreviews?.clear();
+  releaseAllLinkPreviews();
   if (elements.imageViewer.open) elements.imageViewer.close();
   stopMediaTransfers();
   for (const url of downloadUrls.keys()) releaseDownload(url);
@@ -3169,6 +3483,7 @@ window.addEventListener("pagehide", () => {
 window.addEventListener("pageshow", (event) => {
   pageActive = true;
   scheduleVisiblePreviews();
+  for (const node of renderedMessages.values()) updateLinkPreview(node);
   if (event.persisted) {
     connectSocket();
     void synchronize();

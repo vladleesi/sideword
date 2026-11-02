@@ -6,6 +6,8 @@ from pathlib import Path
 
 from fastapi.templating import Jinja2Templates
 
+from .version import __version__
+
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -18,3 +20,5 @@ def _format_dt(value):
 
 
 templates.env.filters["fmt_dt"] = _format_dt
+# Shown in the client header so testers can tell which release a page belongs to.
+templates.env.globals["app_version"] = __version__

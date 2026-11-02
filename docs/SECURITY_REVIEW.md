@@ -1,6 +1,6 @@
 # Security review
 
-**Reviewed:** 2026-10-31 · **Backend:** 0.18.0. Maintainer source/test review;
+**Reviewed:** 2026-11-01 · **Backend:** 0.19.0. Maintainer source/test review;
 not an independent security or cryptographic audit. [Report vulnerabilities](../SECURITY.md).
 
 ## Controls and supporting evidence
@@ -13,6 +13,8 @@ not an independent security or cryptographic audit. [Report vulnerabilities](../
 | Delivery | Exact owner-bound references, atomic delivery receipts, immutable retries and persistence before ACK; [tests](../tests/client_delivery.test.cjs), [status](../tests/test_message_status.py) |
 | Attachments | Strict payload/size validation, ciphertext-only relay, gesture-only paste/drop and safe explicit downloads; [client](../tests/client_attachments.test.cjs), [relay](../tests/test_attachments.py) |
 | Previews | Optional click-to-reveal mode, still-image validation, dimension/resource caps, native decode checks, viewer/composer URL cleanup and trust checks before pre-send reads; [formats/lifecycle](../tests/client_media.test.cjs), [integration](../tests/client_media_integration.test.cjs), [policy](PROTOCOL.md#local-image-previews) |
+| Links | HTTP(S)-only DOM anchors, no-referrer new tabs and lookalike warnings; [tests](../tests/client_links.test.cjs), [policy](PROTOCOL.md#links-and-link-previews) |
+| Link previews | Opt-in device setting; isolated fetcher with HTTPS-only, public-address and pinned connections, revalidated redirects, size/time limits and checked images; per-user limits; local re-encoding; [fetcher](../tests/test_link_preview.py), [relay](../tests/test_link_preview_relay.py), [operations](UPGRADING.md#link-preview-service) |
 | Detached media | Recipient/session-bound reads, inherited expiry, shared queue quotas and separate durable ACKs; [relay](../tests/test_media_transfer.py), [client](../tests/client_transfers.test.cjs) |
 | Capacity/browser | Bounded requests/queues, CSP, text-only rendering, no-store, CSRF and redacted errors; [guards](../app/guards.py), [tests](../tests/test_security_stages.py) |
 | Build/deployment | Exact-image gates, non-root images, recoverable pre-1.0 resets and verified cleanup; [CI](../.github/workflows/test.yml), [deployment tests](../tests/test_deploy.py) |
@@ -27,6 +29,7 @@ not an independent security or cryptographic audit. [Report vulnerabilities](../
   initial keys, rosters or malicious served code; compromised devices remain a risk.
 - TLS terminators and served code are trusted. Non-exportable keys do not stop same-origin
   malicious code. Bearer theft permits queue deletion/disruption without decryption proof.
+- Preview URLs are visible to the relay and fetcher with the requesting account.
 - Names do not unlink identities. Presence/receipts are assertions, not proof of attention.
   Revocation cannot retract sent data. Process limits are not distributed DoS protection.
   See [access lifecycle](SESSION_LIFECYCLE.md) and [operator controls](UPGRADING.md#public-deployment-controls).
@@ -69,6 +72,8 @@ Image regressions cover the automatic default, no decoding while hidden, prefere
 viewer zoom/keyboard/focus/cleanup, stale viewer and pre-send decodes, peer checks
 before pre-send reads, and header-bounded oversized-image reduction with cancellation. They use DOM fakes. Real browser layout, touch gestures,
 screen-reader output and focus rendering were not checked in a browser.
+Link and preview tests use DOM, DNS and socket fakes; real TLS, DNS, firewall rules,
+Docker networking and browser layout were not checked. Lookalike warnings are heuristics.
 Detached-media tests cover metadata-first delivery, independent persistence/ACKs, immutable
 retries, interrupted handoff, routing/content substitution, cancellation and bounded retries.
 Deployment regressions use fake commands and real SQLite to check digest binding,

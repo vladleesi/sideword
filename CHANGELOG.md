@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.0 — 2026-11-01
+
+- Make HTTP(S) URLs in messages clickable through DOM-built, no-referrer links that open in a new tab; other schemes stay text and encrypted payloads are unchanged.
+- Warn inline about links to lookalike or `@`-deceptive hosts.
+- Add opt-in link previews through the optional isolated `link-preview` service: when enabled on a device, compact cards with title, description and image load automatically; nothing shows when no preview is available, and images are re-encoded locally.
+- Show the backend version in the client and administration headers.
+- Use admin-palette icons on administration pages.
+
 ## 0.18.0 — 2026-10-31
 
 - Add a locally stored device setting for incoming images: show supported JPEG/PNG/WebP images automatically (default) or hide them behind Show image. Hidden images are not copied to Blob URLs or decoded, generic-type files stay downloads, and this device's own images always preview.

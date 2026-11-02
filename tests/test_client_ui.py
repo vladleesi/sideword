@@ -144,12 +144,35 @@ def test_client_fonts_are_local_and_allowed_by_its_csp():
         assert client.get("/static/client-media.js").status_code == 200
         assert (response.text.index("/static/client-media.js")
                 < response.text.index("/static/client.js"))
+        # Link cards are local: no remote image, frame or connect sources are allowed.
+        assert client.get("/static/client-links.js").status_code == 200
+        assert (response.text.index("/static/client-links.js")
+                < response.text.index("/static/client.js"))
+        assert 'id="link-previews-on"' in response.text
+        assert 'id="external-link-note"' in response.text
         for name in ("IBMPlexSans-Regular.woff2", "IBMPlexSans-Medium.woff2",
                      "IBMPlexSans-SemiBold.woff2", "IBMPlexMono-Regular.woff2", "OFL.txt"):
             asset = client.get(f"/static/fonts/{name}")
             assert asset.status_code == 200
             assert asset.content == (ROOT / "docs/fonts" / name).read_bytes()
         assert client.get("/static/appearance.js").status_code == 200
+
+
+def test_admin_pages_use_admin_palette_icons_and_other_pages_keep_shared_mark():
+    with TestClient(create_app(), base_url="https://testserver") as client:
+        admin = client.get("/admin/login").text
+        for asset in ("admin-mark.svg", "admin-apple-touch-icon.png"):
+            assert f"/static/{asset}?v=1" in admin
+            assert client.get(f"/static/{asset}").status_code == 200
+        assert "/static/mark.svg" not in admin
+        assert "/static/apple-touch-icon.png" not in admin
+        mark = (ROOT / "app/static/admin-mark.svg").read_text()
+        for color in ("#3A5BD9", "#FFFFFF", "#7893F5", "#0B0D14"):
+            assert color in mark
+        for page in ("/", "/client"):
+            text = client.get(page).text
+            assert "/static/mark.svg?v=1" in text
+            assert "admin-mark.svg" not in text and "admin-apple-touch-icon" not in text
 
 
 def test_admin_login_retains_original_styles_fields_csrf_and_errors():
@@ -281,3 +304,30 @@ def test_attachment_cards_use_the_same_text_and_media_spacing_for_both_senders()
     assert "avatar" not in css
     assert "border-right: 2px solid var(--accent)" not in css
     assert "box-shadow" not in css
+
+
+def test_client_pages_show_the_backend_version_in_the_header_badge():
+    from app.version import __version__
+    with TestClient(create_app(), base_url="https://testserver") as client:
+        pages = [client.get("/client").text, client.get("/l/not-a-real-invite").text]
+    for page in pages:
+        assert f'<span class="app-version">v{__version__}</span>' in page
+        assert page.count('class="app-version"') == 1
+
+
+def test_admin_pages_show_the_backend_version_in_the_top_bar():
+    from app.version import __version__
+    with TestClient(create_app(), base_url="https://testserver") as client:
+        page = client.get("/admin/login").text
+    assert f'<span class="app-version">v{__version__}</span>' in page
+    assert page.count('class="app-version"') == 1
+
+
+def test_preview_and_media_cards_fill_wide_bubbles_without_widening_them():
+    css = (ROOT / "app/static/client.css").read_text()
+    # Each card contributes a default width, then stretches to text wider than it.
+    assert ".link-card { display: block; width: 20rem; min-width: 100%; max-width: 100%;" in css
+    assert "width: fit-content; min-width: 16.5rem; max-width: 100%;" in css
+    assert "min-height: 0; width: 0; min-width: 100%;" in css
+    assert "-webkit-line-clamp: 3; line-clamp: 3;" in css
+    assert "-webkit-line-clamp: 4; line-clamp: 4;" in css

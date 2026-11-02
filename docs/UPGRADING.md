@@ -90,6 +90,35 @@ Use the target release's matching code/assets/backup, test offline and follow
 - Preserve transport ping/pong, TLS certificate checks and private no-store protections.
   See [API limits](API.md#send-retries-and-capacity) and [.env.example](../.env.example).
 
+### Link-preview service
+
+Previews are off unless the relay has `SIDEWORD_LINK_PREVIEW_SERVICE_URL` and
+`SIDEWORD_LINK_PREVIEW_TOKEN` (32+ random characters). The relay authenticates and
+rate-limits users, then forwards to a separate fetcher; it never fetches URLs itself.
+Previews use their own concurrency limit, not the message request slots.
+
+Run the fetcher with [docker-compose.link-preview.yml](../docker-compose.link-preview.yml):
+same image, no database, volumes, `.env` or published ports, read-only and resource-limited.
+The Actions deployer starts only `sideword`; recreate `link-preview` after image updates.
+
+The fetcher's address checks are not a network boundary. Restrict its `sw-preview0` bridge
+on the host to DNS at your resolver and TCP 443 to public addresses:
+
+```sh
+iptables -N SIDEWORD-PREVIEW
+iptables -A SIDEWORD-PREVIEW -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+iptables -A SIDEWORD-PREVIEW -d RESOLVER_IP -p udp --dport 53 -j RETURN
+iptables -A SIDEWORD-PREVIEW -d RESOLVER_IP -p tcp --dport 53 -j RETURN
+iptables -A SIDEWORD-PREVIEW -d 0.0.0.0/8,10.0.0.0/8,100.64.0.0/10,127.0.0.0/8,169.254.0.0/16,172.16.0.0/12,192.0.0.0/24,192.168.0.0/16,198.18.0.0/15,224.0.0.0/3 -j DROP
+iptables -A SIDEWORD-PREVIEW -p tcp --dport 443 -j RETURN
+iptables -A SIDEWORD-PREVIEW -j DROP
+iptables -I DOCKER-USER -i sw-preview0 -j SIDEWORD-PREVIEW
+```
+
+Persist the rules, block IPv6 equivalently if enabled, and verify that private, metadata and
+non-443 destinations fail from the container. Fetched sites see the fetcher's address; the
+relay can link accounts to requested URLs. Neither component logs or stores them.
+
 ### Public asset transfers
 
 Cache/compress only public `/static/` GET/HEAD responses; retain gzip, ETag/Last-Modified,

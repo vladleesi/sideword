@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     client_access_minutes: int = Field(default=15, ge=1, le=60)
     client_session_days: int = Field(default=30, ge=1, le=365)
     refresh_retry_seconds: int = Field(default=30, ge=1, le=120)
+    # Optional isolated preview service; previews stay unavailable unless both are set.
+    link_preview_service_url: str | None = None
+    link_preview_token: str | None = Field(default=None, min_length=32)
+    link_previews_per_minute: int = Field(default=30, ge=1, le=120)
+    link_preview_concurrency: int = Field(default=4, ge=1, le=8)
 
     admin_username: str | None = Field(default=None)
     admin_password: str | None = Field(default=None)
@@ -77,6 +82,23 @@ class Settings(BaseSettings):
         for address in value.split(","):
             ip_address(address.strip())
         return value
+
+    @field_validator("link_preview_service_url")
+    @classmethod
+    def _preview_service_url(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        from urllib.parse import urlsplit
+        parts = urlsplit(value)
+        if (parts.scheme != "http" or not parts.hostname or parts.username or parts.password
+                or parts.path not in ("", "/") or parts.query or parts.fragment
+                or parts.port is None):
+            raise ValueError("SIDEWORD_LINK_PREVIEW_SERVICE_URL must be http://host:port")
+        return value.rstrip("/")
+
+    @property
+    def link_previews_enabled(self) -> bool:
+        return bool(self.link_preview_service_url and self.link_preview_token)
 
     @field_validator("secret_key")
     @classmethod
@@ -91,6 +113,14 @@ class Settings(BaseSettings):
                 "SIDEWORD_SECRET_KEY must be replaced with a random secret"
             )
         return value
+
+    @model_validator(mode="after")
+    def _link_preview_pair(self) -> "Settings":
+        # A token alone leaves previews off; a service URL without a token is a misconfiguration.
+        if self.link_preview_service_url and not self.link_preview_token:
+            raise ValueError(
+                "SIDEWORD_LINK_PREVIEW_SERVICE_URL requires SIDEWORD_LINK_PREVIEW_TOKEN")
+        return self
 
     @model_validator(mode="after")
     def _reject_placeholder_admin_password(self) -> "Settings":

@@ -49,6 +49,7 @@ class SecurityGuards:
         self.connections = 0
         self.http_requests = 0
         self.static_requests = 0
+        self.preview_requests = 0
 
     async def __call__(self, scope, receive, send):
         if scope["type"] not in {"http", "websocket"}:
@@ -124,10 +125,13 @@ class SecurityGuards:
             finally:
                 self.connections -= 1
 
-        # Script/font loads must not compete with expensive message requests.
+        # Script/font loads and slow link previews must not compete with message requests.
         static_read = scope["method"] in {"GET", "HEAD"} and scope["path"].startswith("/static/")
-        counter = "static_requests" if static_read else "http_requests"
-        limit = 32 if static_read else settings.max_http_concurrency
+        preview = scope["method"] == "POST" and scope["path"] == "/api/v1/link-previews"
+        counter = ("static_requests" if static_read else "preview_requests" if preview
+                   else "http_requests")
+        limit = (32 if static_read else settings.link_preview_concurrency if preview
+                 else settings.max_http_concurrency)
         if getattr(self, counter) >= limit:
             return await reject(429, "request concurrency capacity reached; retry later")
         setattr(self, counter, getattr(self, counter) + 1)

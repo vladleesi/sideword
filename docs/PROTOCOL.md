@@ -3,7 +3,8 @@
 Unaudited; no recipient forward secrecy or post-compromise recovery. Backend, HTTP
 API, application payload and cryptographic envelope versions are independent.
 `client-protocol.js` owns Web Crypto/payload operations; `client-media.js` owns local
-preview validation/resources; `client.js` owns trust, DOM, networking and persistence.
+preview validation/resources; `client-links.js` owns link detection; `client.js` owns
+trust, DOM, networking and persistence.
 See [security limits](SECURITY_REVIEW.md).
 
 ## Wire representation
@@ -140,6 +141,22 @@ to 20 MiB and 50 megapixels by header, are re-encoded locally as metadata-free J
 within preview limits; transparency becomes white. Browser-copied images are PNGs, so
 this lets chat images be pasted back. Output must pass preview validation; Send stays
 disabled until reduction succeeds, and failure removes the selection with an error.
+
+### Links and link previews
+
+Only explicit `http://`/`https://` URLs in decrypted text become links; other schemes and
+bare domains stay text. Bidi/zero-width characters end a URL. Links are DOM anchors with
+the typed text, the parsed `href`, `noopener noreferrer` and a new tab; payloads and history
+are unchanged.
+
+Hosts with text before `@`, mixed scripts or Latin lookalike letters get an inline warning;
+this is a heuristic, not a full confusable check.
+
+Previews are off until enabled in device settings and offered by the server. Then the first
+HTTPS link of each rendered text message is sent to the [link-preview API](API.md#link-previews),
+up to three at a time, newest first, one request per address. Text renders with
+`textContent`; images are validated and re-encoded locally to a small JPEG shown from a Blob
+URL. Results stay in tab memory only; without a preview, nothing is shown under the link.
 
 ## Identity checks and local state
 

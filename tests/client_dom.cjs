@@ -36,7 +36,13 @@ function client({ mobile = false, clipboardBlocked = false, viewportAware = fals
       this.attributes.set(name, value);
       if (name === 'data-mobile-view') this.dataset.mobileView = value;
     }
-    append(...nodes) { for (const node of nodes) this.insertBefore(node, null); }
+    append(...nodes) { for (const node of nodes) this.insertBefore(typeof node === 'string' ? textNode(node) : node, null); }
+    after(node) { this.parent.insertBefore(node, this.parent.children[this.parent.children.indexOf(this) + 1] || null); }
+    closest(selector) {
+      const tags = selector.split(',').map(tag => tag.trim().toUpperCase());
+      for (let node = this; node; node = node.parent) if (tags.includes(String(node.tagName).toUpperCase())) return node;
+      return null;
+    }
     replaceChildren(...nodes) {
       for (const child of [...this.children]) child.remove();
       this.append(...nodes);
@@ -63,6 +69,7 @@ function client({ mobile = false, clipboardBlocked = false, viewportAware = fals
     close() { this.open = false; this.emit('close'); }
     requestSubmit(button) { this.submittedWith = button; }
   }
+  const textNode = value => Object.assign(new Node('#text'), { text: value });
   const documentEvents = new Map();
   const windowEvents = new Map();
   const cancelledTimers = new Set();
@@ -101,7 +108,7 @@ function client({ mobile = false, clipboardBlocked = false, viewportAware = fals
     replaceState(state) { this.state = structuredClone(state); },
   };
   const context = vm.createContext({ TextEncoder, TextDecoder, DOMException, AbortController,
-    Headers,
+    Headers, URL,
     performance: { now: () => window.now || 0 },
     Intl: { DateTimeFormat: function (_, options) {
       return new Intl.DateTimeFormat(locale, { ...options, ...(timeZone ? {timeZone} : {}) });
@@ -123,6 +130,7 @@ function client({ mobile = false, clipboardBlocked = false, viewportAware = fals
   };
   vm.runInContext(fs.readFileSync('app/static/client-protocol.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('app/static/client-media.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('app/static/client-links.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('app/static/client.js', 'utf8')
     .replace(/start\(\)\.catch[^\n]+/, ''), context);
   const run = code => vm.runInContext(code, context);

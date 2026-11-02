@@ -439,6 +439,16 @@ test('oversized images reduce within preview limits to a validated JPEG and rele
   assert.deepEqual([log.canvases[0].width, log.canvases[0].height], [0, 0]);
 });
 
+test('image reduction can produce bounded thumbnails without exceeding preview limits', async () => {
+  const app = media(), log = reducer(app);
+  const output = await app.api.reduceImage(new Uint8Array(pngDimensions(6000, 4000)), 'image/png', 48 * 1024, () => true, 320);
+  assert.deepEqual([...output], [...fixtures('valid.jpg')]);
+  assert.deepEqual(log.encodes[0].slice(0, 2), [320, 213]);
+  const larger = media(), largerLog = reducer(larger);
+  await larger.api.reduceImage(new Uint8Array(pngDimensions(6000, 4000)), 'image/png', 900_000, () => true, 99999);
+  assert.ok(largerLog.encodes[0][0] <= larger.api.MAX_DIMENSION);
+});
+
 test('image reduction rejects mislabeled, huge, failed, cancelled and unreachable sources', async () => {
   const png = new Uint8Array(pngDimensions(6000, 4000));
   let app = media(), log = reducer(app);
