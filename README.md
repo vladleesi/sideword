@@ -16,9 +16,7 @@ Sideword is a self-hosted, end-to-end encrypted messenger for private conversati
 It includes a browser-based messenger, an administrative interface and a FastAPI/SQLite
 backend in one application.
 
-**Experimental and unaudited.** Sideword has not had an independent security or
-cryptographic audit and is not established as production-ready. Read the
-[security limits](SECURITY.md) before using it for sensitive conversations.
+Read the [security limits](SECURITY.md) before using Sideword for sensitive conversations.
 
 ## Overview
 

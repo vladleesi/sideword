@@ -1,7 +1,7 @@
 # Security review
 
-**Reviewed:** 2026-11-01 · **Application:** 0.22.2. Maintainer source/test review;
-not an independent security or cryptographic audit. [Report vulnerabilities](../SECURITY.md).
+**Reviewed:** 2026-11-01 · **Application:** 0.22.2. Maintainer source/test review.
+[Report vulnerabilities](../SECURITY.md).
 
 ## Controls and supporting evidence
 

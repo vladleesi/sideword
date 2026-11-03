@@ -12,7 +12,6 @@ Initial acknowledgement is expected within seven days; resolution depends on sev
 
 ## Security limits
 
-Sideword is experimental and has not had an independent security or cryptographic audit. V1 has no recipient forward
-secrecy or post-compromise recovery; first-use pins cannot authenticate initial keys or
-malicious served code.
+V1 has no recipient forward secrecy or post-compromise recovery; first-use pins cannot
+authenticate initial keys or malicious served code.
 Read the [security review](docs/SECURITY_REVIEW.md) and [protocol](docs/PROTOCOL.md).
