@@ -565,6 +565,18 @@ def test_workflows_share_severity_policy_and_retain_failure_reports():
         assert trivy["with"]["cache"] == "false"
         assert trivy["env"]["TRIVY_IMAGE_SRC"] == "docker"
         assert trivy["env"]["TRIVY_IGNOREFILE"] == "/dev/null"
+        # The action's own installer uses get.trivy.dev; a pinned, hash-checked GitHub
+        # release is installed first instead, for the same version.
+        assert trivy["with"]["skip-setup-trivy"] == "true"
+        install = next(step for step in steps
+                       if step.get("name") == "Install the pinned Trivy release")
+        assert steps.index(install) < steps.index(trivy)
+        assert f"v{install['env']['TRIVY_VERSION']}" == trivy["with"]["version"]
+        assert re.fullmatch(r"[0-9a-f]{64}", install["env"]["TRIVY_SHA256"])
+        assert ("https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/"
+                in install["run"])
+        assert 'sha256sum --check --strict' in install["run"]
+        assert "get.trivy.dev" not in install["run"] and "uses" not in install
         gate = next(step for step in steps
                     if "scripts.security_scan report" in step.get("run", ""))
         assert gate["if"] == "always()" and "TRIVY_OUTCOME" in gate["env"]
