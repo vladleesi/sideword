@@ -58,7 +58,7 @@ jobs:
       - run: node --check docs/theme.js
       - run: node --test tests/client_retry.test.cjs tests/client_connection.test.cjs tests/client_delivery.test.cjs tests/client_message_status.test.cjs tests/client_crypto.test.cjs tests/client_attachments.test.cjs tests/client_identity.test.cjs tests/client_ui.test.cjs tests/client_theme.test.cjs tests/admin_links.test.cjs tests/invite_vault.test.cjs
       - run: node --test tests/site_theme.test.cjs
-      - run: node --test tests/client_media.test.cjs tests/client_media_integration.test.cjs tests/client_transfers.test.cjs tests/client_links.test.cjs tests/client_emoji.test.cjs tests/client_reactions.test.cjs
+      - run: node --test tests/client_media.test.cjs tests/client_media_integration.test.cjs tests/client_transfers.test.cjs tests/client_links.test.cjs tests/client_emoji.test.cjs tests/client_reactions.test.cjs tests/client_replies.test.cjs
       - run: python -m pytest
 
   container:

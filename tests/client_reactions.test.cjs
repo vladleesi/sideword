@@ -258,7 +258,7 @@ test('picker and chips work by keyboard and touch without opening message detail
     createdAt: 1000, envelopes: [{ recipient_public_id: 'peer-a', ciphertext: 'opaque' }] })`);
   const row = rowFor(app, 'outgoing:own-1');
   const trigger = row.reactionTrigger;
-  assert.equal(trigger.attributes.get('aria-label'), 'Add reaction');
+  assert.equal(trigger.attributes.get('aria-label'), 'React or reply');
   assert.equal(trigger.disabled, false);
   // Tapping while typing keeps the composer (and mobile keyboard) focused.
   app.nodes.get('#message-input').focus();
@@ -277,6 +277,9 @@ test('picker and chips work by keyboard and touch without opening message detail
   assert.equal(trigger.attributes.get('aria-expanded'), 'true');
   assert.deepEqual([...picker.buttons].map(button => button.textContent), [THUMBS, HEART, JOY, THINK, CRY]);
   assert.equal(app.document.activeElement, picker.buttons[0]);
+  // Arrow keys wrap through the five emoji and the bar's Reply button.
+  picker.node.emit('keydown', { key: 'ArrowLeft', preventDefault() {} });
+  assert.equal(app.document.activeElement.textContent, 'Reply');
   picker.node.emit('keydown', { key: 'ArrowLeft', preventDefault() {} });
   assert.equal(app.document.activeElement, picker.buttons[4]);
   picker.node.emit('keydown', { key: 'Escape', preventDefault() {}, stopPropagation() {} });
@@ -407,4 +410,33 @@ test('chip updates happen in place and only layout changes animate', async () =>
   animations.length = 0;
   await receive(app, 'peer-a', 'r6', reaction('peer-a', 'm1', CRY, 3));
   assert.equal(animations.length, 0);
+});
+
+test('message details list who reacted, ordered by reaction with your own first, and update live', async () => {
+  const app = reactionClient();
+  await app.run(`storeOutgoing({ chatId: 7, messageId: 'own-1', payload: { v: 1, type: 'text', text: 'mine' },
+    createdAt: 1000, envelopes: [{ recipient_public_id: 'peer-a', ciphertext: 'opaque' }] })`);
+  const row = rowFor(app, 'outgoing:own-1');
+  const details = () => {
+    const section = app.nodes.get('#message-details-recipients').children
+      .find(node => node.children[0].textContent === 'Reactions');
+    return section ? section.children[1].children.map(item => item.children.map(part => part.textContent)) : null;
+  };
+  app.run(`showMessageDetails(7, messagesByChat.get(7).find(entry => entry.id === 'outgoing:own-1'), elements.messageInput)`);
+  assert.equal(details(), null, 'no section without reactions');
+  await receive(app, 'peer-b', 'r1', reaction('me', 'own-1', JOY, 1));
+  await receive(app, 'peer-a', 'r2', reaction('me', 'own-1', THUMBS, 1));
+  app.run('globalThis.failFlush = true;');
+  await app.run(`toggleReaction(7, messagesByChat.get(7).find(entry => entry.id === 'outgoing:own-1'), "${JOY}")`);
+  const messageId = app.run('queued[0].messageId');
+  await app.run(`appendMessage(7, { id: 'send_failed:${messageId}', kind: 'send_failed', clientMessageId: '${messageId}' })`);
+  // Names stay text, duplicates are disambiguated, and the unsent own reaction is marked.
+  assert.deepEqual(details(), [['Alex (peer-a)', THUMBS], ['You (not sent yet)', JOY], ['<b>Alex</b>', JOY]]);
+  assert.deepEqual(summary(row), [`${THUMBS}1`, `${JOY}2*`]);
+  // Removals disappear from the open dialog.
+  await receive(app, 'peer-a', 'r3', reaction('me', 'own-1', null, 2));
+  await receive(app, 'peer-b', 'r4', reaction('me', 'own-1', null, 2));
+  app.run('globalThis.failFlush = false;');
+  await app.run(`toggleReaction(7, messagesByChat.get(7).find(entry => entry.id === 'outgoing:own-1'), "${JOY}")`);
+  assert.equal(details(), null);
 });

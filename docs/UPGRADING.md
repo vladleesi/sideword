@@ -20,6 +20,10 @@ cannot guarantee physical erasure from SSDs, old backups, snapshots or host memo
 
 ## Upgrade
 
+0.25.0 adds an optional encrypted reply field to text and file messages; clients before
+0.25.0 keep replies queued without acknowledging or showing them until reloaded with
+matching assets. See [replies](PROTOCOL.md#replies).
+
 0.24.0 adds encrypted reaction messages; clients before 0.24.0 keep them queued without
 acknowledging them until reloaded with matching assets. See [reactions](PROTOCOL.md#reactions).
 

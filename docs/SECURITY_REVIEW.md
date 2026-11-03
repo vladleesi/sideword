@@ -16,6 +16,7 @@
 | Links | HTTP(S)-only DOM anchors, no-referrer new tabs and lookalike warnings; [tests](../tests/client_links.test.cjs), [policy](PROTOCOL.md#links-and-link-previews) |
 | Link previews | Device setting, on by default; sender-made previews inside the encrypted payload, so recipients never fetch; strict payload validation; isolated fetcher (page tags or official/discovered oEmbed JSON, never provider HTML) with HTTPS-only, public-address and pinned connections, revalidated redirects, size/time limits and checked images; per-user limits; local re-encoding; [fetcher](../tests/test_link_preview.py), [relay](../tests/test_link_preview_relay.py), [operations](UPGRADING.md#link-preview-service) |
 | Reactions | Encrypted per-recipient payloads with no server-readable emoji or target; sender bound by envelope authentication, chat-scoped targets, five allowed emoji, highest-revision ordering against stale/replayed operations, persistence before ACK; [tests](../tests/client_reactions.test.cjs), [policy](PROTOCOL.md#reactions) |
+| Replies | Encrypted reply references with no server-readable quote or relationship; chat-scoped resolution against local messages, strictly bounded single-line excerpts without control or bidi characters, no nesting, text-only rendering, unverified excerpts labelled as sender quotes; [tests](../tests/client_replies.test.cjs), [policy](PROTOCOL.md#replies) |
 | Detached media | Recipient/session-bound reads, inherited expiry, shared queue quotas and separate durable ACKs; [relay](../tests/test_media_transfer.py), [client](../tests/client_transfers.test.cjs) |
 | Capacity/browser | Bounded requests/queues, CSP with Trusted Types and framing denial on client and invite pages, text-only rendering, invite tokens removed from the URL on load, no-store, `nosniff` assets, CSRF and redacted errors; [guards](../app/guards.py), [tests](../tests/test_security_stages.py), [delivery](../tests/test_static_delivery.py) |
 | Build/deployment | Exact-image gates, non-root images, recoverable pre-1.0 resets and verified cleanup; [CI](../.github/workflows/test.yml), [deployment tests](../tests/test_deploy.py) |
@@ -33,6 +34,8 @@
 - Links a sender previews, including unsent drafts, are visible to the relay and fetcher with
   the sender's account. Preview text and images are sender-controlled; recipients bind them
   to the message's own link and sender, keep the first one, and always show the real host.
+- A reply's excerpt is sender-controlled: until the original reaches this device it can
+  misquote it, so it is labelled as quoted by the sender and replaced by the local copy.
 - Reactions hide their emoji and target, but their small size and timing can let the relay
   guess that a message is a reaction. A participant can only change its own reaction.
 - Names do not unlink identities. Presence/receipts are assertions, not proof of attention.

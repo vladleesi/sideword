@@ -68,6 +68,11 @@ Plaintext JSON has exactly one of these field sets:
 - References carry the same metadata, optional text up to 16,000 UTF-8 bytes and
   `media_id` equal to the parent message ID plus `.media` (parent: 1–58 ASCII letters,
   digits, underscores or hyphens). File bytes are accepted only on the media channel.
+- Reply: text and references may add `"reply":{"author":"<public ID>","target":"<client message ID>","excerpt":"…"}`
+  naming a message in the same chat. `author` and `target` are 1–64 ASCII letters, digits,
+  underscores or hyphens; `excerpt` is `null` or 1–200 UTF-16 code units without leading or
+  trailing spaces, control or bidirectional formatting characters or unpaired surrogates.
+  Replies hold no nested reply. See [replies](#replies).
 - Reject unknown fields/types/versions, malformed encodings, size mismatches and
   payloads over 1,400,000 UTF-8 bytes. No legacy/raw-text fallback.
 
@@ -226,6 +231,27 @@ reactions.
 Clients before 0.24.0 reject reaction payloads as unsupported: they keep them queued without
 acknowledging them, show "Message retained for retry", and apply nothing until updated or
 until the content expires.
+
+### Replies
+
+A reply is an ordinary text or file-reference message with an encrypted `reply` field, so
+the relay sees neither the quoted text nor which message is answered. Its target resolves
+like a reaction's: author public ID and client message ID within the envelope's chat only.
+The quote shows the target's own text, an "Image" or "File" label, never the target's own
+quote, so chains never nest.
+
+`excerpt` is the sender's short, single-line copy of the target's text (`null` for files
+without text). It is shown only while the target is not on this device and is marked as
+quoted by the sender, because it is sender-controlled and unverified. Once the target
+arrives, in any order or after reload, the quote shows the device's own copy instead.
+Filenames are never quoted.
+
+Replies are composed per conversation in memory and cleared only after the reply is
+durably queued; a send that fails earlier keeps the text and reply. Selecting a quote scrolls
+to the original and outlines it briefly.
+
+Clients before 0.25.0 reject payloads with `reply`: they keep such messages queued without
+acknowledging or showing them until updated or until the content expires.
 
 ## Identity checks and local state
 

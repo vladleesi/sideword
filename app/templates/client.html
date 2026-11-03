@@ -12,12 +12,12 @@
   <link rel="preload" href="/static/fonts/IBMPlexSans-SemiBold.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
   <script src="/static/appearance.js?v=2"></script>
-  <link rel="stylesheet" href="/static/client.css?v=49">
-  <script src="/static/client-protocol.js?v=9" defer></script>
+  <link rel="stylesheet" href="/static/client.css?v=51">
+  <script src="/static/client-protocol.js?v=10" defer></script>
   <script src="/static/client-media.js?v=9" defer></script>
   <script src="/static/client-links.js?v=2" defer></script>
   <script src="/static/client-emoji.js?v=2" defer></script>
-  <script src="/static/client.js?v=67" defer></script>
+  <script src="/static/client.js?v=69" defer></script>
 </head>
 <body class="messenger">
   <a class="skip-link" href="#workspace">Skip to workspace</a>
@@ -105,6 +105,15 @@
           <p class="empty-state">Choose a conversation to view messages.</p>
         </div>
         <form id="message-form" class="composer">
+          <div id="reply-preview" class="reply-preview" hidden>
+            <p class="reply-preview-text">
+              <span class="reply-preview-label">Replying to <strong id="reply-preview-name"></strong></span>
+              <span id="reply-preview-excerpt" class="reply-preview-excerpt"></span>
+            </p>
+            <button id="reply-cancel" class="button subtle icon-button" type="button" aria-label="Cancel reply" title="Cancel reply">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><path d="m6 6 12 12 M18 6 6 18"/></svg>
+            </button>
+          </div>
           <div id="attachment-preview" class="attachment-selection" hidden>
             <span id="attachment-tile" class="file-tile" aria-hidden="true">
               <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z M14 2v6h6 M8 13h8 M8 17h5"/></svg>
@@ -127,7 +136,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01" stroke-width="2.25"/></svg>
           </button>
           <label class="sr-only" for="message-input">Message</label>
-          <textarea id="message-input" maxlength="16000" rows="2" enterkeyhint="send" aria-describedby="composer-help composer-error key-change-warning waiting-notice"
+          <textarea id="message-input" maxlength="16000" rows="2" enterkeyhint="send" aria-describedby="reply-preview composer-help composer-error key-change-warning waiting-notice"
                     placeholder="Write a message" disabled></textarea>
           <button id="send-button" class="button primary" type="submit" disabled>Send</button>
           <p id="composer-error" class="field-error" role="alert" hidden></p>

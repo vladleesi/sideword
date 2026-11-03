@@ -34,6 +34,12 @@ const SidewordProtocol = (() => {
   const REACTION_EMOJI = Object.freeze(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F914}", "\u{1F622}"]);
   const REACTION_FIELDS = ["v", "type", "target_author", "target", "emoji", "rev"];
   const REFERENCE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+  // Optional reply on text and attachment-ref payloads: the quoted message's author public ID and
+  // client message ID in the same chat, plus the sender's short excerpt (null without text).
+  const REPLY_FIELDS = ["author", "target", "excerpt"];
+  const MAX_REPLY_EXCERPT = 200;
+  // Controls, bidirectional formatting and unpaired surrogates never appear in an excerpt.
+  const EXCERPT_FORBIDDEN = /[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
   function payloadError() {
     return new ProtocolError("Invalid or unsupported message payload. The message was not saved or acknowledged.");
@@ -82,6 +88,14 @@ const SidewordProtocol = (() => {
     if (!preview.title && !preview.description && !preview.image) throw payloadError();
   }
 
+  function validateReply(reply) {
+    if (!exactKeys(reply, REPLY_FIELDS) || typeof reply.author !== "string" || !REFERENCE_ID.test(reply.author)
+        || typeof reply.target !== "string" || !REFERENCE_ID.test(reply.target)
+        || !(reply.excerpt === null || (typeof reply.excerpt === "string" && reply.excerpt.length > 0
+          && reply.excerpt.length <= MAX_REPLY_EXCERPT && reply.excerpt.trim() === reply.excerpt
+          && !EXCERPT_FORBIDDEN.test(reply.excerpt)))) throw payloadError();
+  }
+
   function validatePayload(payload) {
     if (!payload || Array.isArray(payload) || payload.v !== 1) throw payloadError();
     if (payload.type === "link-preview") {
@@ -101,12 +115,14 @@ const SidewordProtocol = (() => {
           || !Number.isSafeInteger(payload.rev) || payload.rev < 1) throw payloadError();
       return payload;
     }
-    const fields = payload.type === "text"
-      ? (Object.hasOwn(payload, "preview") ? ["v", "type", "text", "preview"] : ["v", "type", "text"])
+    const required = payload.type === "text" ? ["v", "type", "text"]
       : payload.type === "attachment" ? ["v", "type", "name", "mime", "size", "data"]
       : payload.type === "attachment-ref" ? ["v", "type", "text", "name", "mime", "size", "media_id"] : [];
+    const optional = payload.type === "text" ? ["preview", "reply"] : payload.type === "attachment-ref" ? ["reply"] : [];
+    const fields = [...required, ...optional.filter(field => Object.hasOwn(payload, field))];
     if (Object.keys(payload).length !== fields.length
         || !fields.every(field => Object.hasOwn(payload, field))) throw payloadError();
+    if (Object.hasOwn(payload, "reply")) validateReply(payload.reply);
     if (payload.type === "text") {
       if (typeof payload.text !== "string" || !payload.text.length
           || encoder.encode(payload.text).length > MAX_TEXT_BYTES) {
@@ -136,8 +152,11 @@ const SidewordProtocol = (() => {
     return validatePayload(payload);
   }
 
-  function textPayload(text, preview = null) {
-    return validatePayload(preview ? { v: 1, type: "text", text, preview } : { v: 1, type: "text", text });
+  function textPayload(text, preview = null, reply = null) {
+    const payload = { v: 1, type: "text", text };
+    if (preview) payload.preview = preview;
+    if (reply) payload.reply = reply;
+    return validatePayload(payload);
   }
 
   function linkPreviewPayload(target, preview) {
@@ -154,8 +173,10 @@ const SidewordProtocol = (() => {
       size: bytes.byteLength, data: bytesToBase64(bytes) });
   }
 
-  function fileReference(name, mime, size, mediaId, text = "") {
-    return validatePayload({ v: 1, type: "attachment-ref", name, mime, size, media_id: mediaId, text });
+  function fileReference(name, mime, size, mediaId, text = "", reply = null) {
+    const payload = { v: 1, type: "attachment-ref", name, mime, size, media_id: mediaId, text };
+    if (reply) payload.reply = reply;
+    return validatePayload(payload);
   }
 
   function safeDownloadName(name) {
@@ -304,5 +325,5 @@ const SidewordProtocol = (() => {
     decryptMessage, publicKeyFingerprint, ProtocolError, encodePayload, decodePayload,
     textPayload, linkPreviewPayload, reactionPayload, filePayload, fileReference, validatePayload, attachmentBytes, safeDownloadName,
     attachmentSendBytes, MAX_FILE_BYTES, MAX_TEXT_BYTES, MAX_SEND_BYTES, MAX_WIRE_CHARS, MAX_PREVIEW_IMAGE_BYTES,
-    REACTION_EMOJI });
+    MAX_REPLY_EXCERPT, REACTION_EMOJI });
 })();

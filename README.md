@@ -28,7 +28,7 @@ messages and files. No separate client build or installation is required.
 
 - Invite-only individual and group conversations, with per-chat display names.
 - Expiring invites, optional room passwords and administrative chat/access controls.
-- Client-side encryption for text, reactions, attachments, filenames and file types.
+- Client-side encryption for text, replies, reactions, attachments, filenames and file types.
 - Attachments up to 1 MiB, with local image previews and explicit downloads;
   [group size and media limits](docs/PROTOCOL.md#independent-media-delivery) apply.
 - Real-time WebSocket delivery with HTTP polling fallback, delivery/viewing status

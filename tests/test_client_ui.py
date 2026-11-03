@@ -467,14 +467,41 @@ def test_reaction_layout_keeps_status_touch_and_card_contracts():
     # The picker floats beside the message instead of resizing the bubble; motion is optional.
     assert ".reaction-picker { position: fixed; z-index: 3;" in css
     assert "@media (prefers-reduced-motion: reduce) { .reaction-picker { animation: none; }" in css
-    # Without hover the trigger stays visible, with room beside bubbles and larger touch targets.
-    assert "@media (hover: none) { .reaction-trigger { opacity: .7; } }" in css
+    # Touch keeps the actions visible beside bubbles; reply is reached through the reaction bar.
+    assert ("@media (hover: none) { .message-actions { opacity: .7; } "
+            ".reply-action { display: none; } }") in css
     assert ".message.mine, .message.theirs { max-width: min(calc(100% - 2.5rem), 34rem); }" in css
     assert (".message.mine:has(.attachment-card, .link-card), "
             ".message.theirs:has(.attachment-card, .link-card) "
             "{ max-width: min(calc(100% - 2.5rem), 24rem); }") in css
     assert ".reaction-option { width: 44px; height: 44px; }" in css
-    assert ".reaction-trigger:disabled { display: none; }" in css
+    assert ".reaction-trigger:disabled, .reply-action:disabled { display: none; }" in css
     assert '.reaction-chip[aria-pressed="true"], .reaction-option[aria-pressed="true"]' in css
     script = (ROOT / "app/static/client.js").read_text()
     assert "innerHTML" not in script and "insertAdjacentHTML" not in script
+
+
+def test_reply_preview_and_quote_keep_composer_and_card_layouts():
+    html = (ROOT / "app/templates/client.html").read_text()
+    tree = Structure(html)
+    preview = tree.by_id("reply-preview")
+    assert tree.by_id("message-form") in preview["parents"] and "hidden" in preview["attrs"]
+    cancel = tree.by_id("reply-cancel")
+    assert cancel["attrs"]["type"] == "button" and cancel["attrs"]["aria-label"] == "Cancel reply"
+    assert "reply-preview" in tree.by_id("message-input")["attrs"]["aria-describedby"].split()
+    order = [node["attrs"].get("id") for node in tree.nodes]
+    assert order.index("reply-preview") < order.index("message-input")
+    css = (ROOT / "app/static/client.css").read_text()
+    # The preview takes the first composer row; attached files move down beneath it.
+    assert "#reply-preview { grid-column: 1 / -1; grid-row: 1; }" in css
+    assert ".composer.has-reply.has-attachment #attachment-preview { grid-row: 2; }" in css
+    assert ".composer.has-reply.has-attachment #message-input," in css
+    # In file cards the quote comes first and every other row shifts down by one.
+    assert ".attachment-card > .reply-quote { grid-column: 1 / -1; grid-row: 1; }" in css
+    assert ".attachment-card.has-reply > .message-content { grid-row: 2; }" in css
+    assert (".attachment-card.has-reply:not(.has-reactions) > .message-footer "
+            "{ grid-row: 6; }") in css
+    assert ".reply-quote-text { -webkit-line-clamp: 2; line-clamp: 2; }" in css
+    assert ("@media (prefers-reduced-motion: reduce) { .reply-preview { animation: none; } "
+            ".message-bubble.reply-highlight { animation: none; "
+            "outline-color: var(--accent); } }") in css

@@ -193,6 +193,7 @@ textarea:disabled { color: var(--muted); }
 .message-details ul { list-style: none; padding: 0; margin: 0; }
 .message-details li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .2rem .75rem; padding: .15rem 0; font-family: var(--sans); font-size: .8125rem; }
 .receipt-time { color: var(--muted); font-size: .7rem; }
+.reaction-detail-emoji { font-family: var(--emoji); font-size: .9375rem; line-height: 1.2; }
 .message-details summary { cursor: pointer; }
 .participant { border-top: 1px solid var(--border); }
 .participant:last-child { border-bottom: 1px solid var(--border); }
@@ -441,13 +442,14 @@ textarea:disabled { color: var(--muted); }
 .emoji-only > .message-footer { position: static; font-size: .9375rem; line-height: 1.45; }
 
 /* Reactions: a quiet trigger beside the bubble, chips on the status line, a floating picker. */
-.reaction-trigger { position: absolute; bottom: 0; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--bg); color: var(--muted); cursor: pointer; opacity: 0; transition: opacity .12s ease-out; }
-.message.theirs .reaction-trigger { left: calc(100% + .3rem); }
-.message.mine .reaction-trigger { right: calc(100% + .3rem); }
-.reaction-trigger svg { display: block; width: 18px; height: 18px; }
-.message:hover .reaction-trigger:not(:disabled), .reaction-trigger:focus-visible, .reaction-trigger[aria-expanded="true"] { opacity: 1; }
-.reaction-trigger:hover, .reaction-trigger[aria-expanded="true"] { color: var(--text); border-color: var(--control-border); }
-.reaction-trigger:disabled { display: none; }
+.message-actions { position: absolute; bottom: 0; display: flex; gap: .25rem; opacity: 0; transition: opacity .12s ease-out; }
+.message.theirs .message-actions { left: calc(100% + .3rem); }
+.message.mine .message-actions { right: calc(100% + .3rem); flex-direction: row-reverse; }
+.reaction-trigger, .reply-action { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--bg); color: var(--muted); cursor: pointer; }
+.reaction-trigger svg, .reply-action svg { display: block; width: 18px; height: 18px; }
+.message:hover .message-actions, .message-actions:focus-within, .message-actions:has([aria-expanded="true"]) { opacity: 1; }
+.reaction-trigger:hover, .reply-action:hover, .reaction-trigger[aria-expanded="true"] { color: var(--text); border-color: var(--control-border); }
+.reaction-trigger:disabled, .reply-action:disabled { display: none; }
 .message-reactions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; margin-top: .35rem; }
 .reaction-chip { display: inline-flex; align-items: center; gap: .25rem; min-height: 26px; padding: 0 .5rem; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: .75rem; line-height: 1; cursor: pointer; transition: border-color .12s ease-out, background-color .12s ease-out; }
 .reaction-chip:hover:not(:disabled) { border-color: var(--control-border); }
@@ -471,9 +473,11 @@ textarea:disabled { color: var(--muted); }
 .reaction-option { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid transparent; border-radius: 50%; background: transparent; font-family: var(--emoji); font-size: 1.25rem; line-height: 1; cursor: pointer; transition: transform .1s ease-out, background-color .1s ease-out; }
 .reaction-option:hover, .reaction-option:focus-visible { background: var(--surface-alt); transform: scale(1.12); }
 .reaction-option[aria-pressed="true"] { border-color: var(--accent); }
-.reaction-option:focus-visible, .reaction-chip:focus-visible, .reaction-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.reaction-reply { display: inline-flex; align-items: center; min-height: 36px; margin-left: .15rem; padding: 0 .75rem; border: 0; border-left: 1px solid var(--border); border-radius: 0 999px 999px 0; background: transparent; color: var(--text); font-family: var(--sans); font-size: .8125rem; font-weight: 500; cursor: pointer; }
+.reaction-reply:hover, .reaction-reply:focus-visible { background: var(--surface-alt); }
+.reaction-option:focus-visible, .reaction-chip:focus-visible, .reaction-trigger:focus-visible, .reply-action:focus-visible, .reaction-reply:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Touch screens have no hover: the trigger stays visible, with room reserved beside bubbles. */
-@media (hover: none) { .reaction-trigger { opacity: .7; } }
+@media (hover: none) { .message-actions { opacity: .7; } .reply-action { display: none; } }
 @media (max-width: 760px) {
   .message.mine, .message.theirs { max-width: min(calc(100% - 2.5rem), 34rem); }
   .message.mine:has(.attachment-card, .link-card), .message.theirs:has(.attachment-card, .link-card) { max-width: min(calc(100% - 2.5rem), 24rem); }
@@ -481,10 +485,43 @@ textarea:disabled { color: var(--muted); }
 @media (pointer: coarse) {
   .reaction-trigger { width: 34px; height: 34px; }
   .reaction-option { width: 44px; height: 44px; }
+  .reaction-reply { min-height: 44px; }
   .reaction-chip, .message-bubble.has-reactions > .message-footer > .message-status { min-height: 32px; }
 }
-@media (prefers-reduced-motion: reduce) { .reaction-picker { animation: none; } .reaction-trigger, .reaction-chip, .reaction-option { transition: none; } .reaction-option:hover, .reaction-option:focus-visible { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .reaction-picker { animation: none; } .message-actions, .reaction-chip, .reaction-option { transition: none; } .reaction-option:hover, .reaction-option:focus-visible { transform: none; } }
 @media (forced-colors: active) {
   .reaction-trigger, .reaction-chip, .reaction-picker { border-color: ButtonText; }
   .reaction-chip[aria-pressed="true"], .reaction-option[aria-pressed="true"] { border-color: Highlight; }
 }
+
+/* Replies: a compact preview above the composer and a quoted block at the top of the reply. */
+#reply-preview { grid-column: 1 / -1; grid-row: 1; }
+.composer.has-reply.has-attachment #attachment-preview { grid-row: 2; }
+.composer.has-reply.has-attachment #message-input, .composer.has-reply.has-attachment #attachment-button, .composer.has-reply.has-attachment #emoji-button, .composer.has-reply.has-attachment #send-button { grid-row: 3; }
+.reply-preview { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: .5rem; padding: .25rem .25rem .25rem .65rem; border-left: 2px solid var(--accent); border-radius: 2px; background: var(--surface); animation: reply-preview-in .14s cubic-bezier(.2, 0, 0, 1); }
+@keyframes reply-preview-in { from { opacity: 0; transform: translateY(4px); } }
+.reply-preview-text { min-width: 0; font-size: .8125rem; line-height: 1.35; }
+.reply-preview-label { display: block; color: var(--muted); font-size: .7rem; }
+.reply-preview-label strong { color: var(--accent-foreground); font-weight: 500; }
+.reply-preview-excerpt, .reply-quote-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; line-clamp: 1; overflow: hidden; overflow-wrap: anywhere; unicode-bidi: plaintext; }
+#reply-cancel { color: var(--muted); }
+#reply-cancel:hover { color: var(--text); }
+.reply-quote { display: block; width: 100%; min-width: 0; margin: 0 0 .35rem; padding: .25rem .5rem; border: 0; border-left: 2px solid var(--accent); border-radius: 2px; background: var(--surface-alt); background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text); font-family: var(--sans); font-size: .8125rem; line-height: 1.35; text-align: left; cursor: pointer; }
+.reply-quote:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.reply-quote:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.reply-quote-name { display: block; color: var(--accent-foreground); font-size: .75rem; font-weight: 500; }
+.reply-quote-text { -webkit-line-clamp: 2; line-clamp: 2; }
+.reply-quote-note { display: block; margin-top: .1rem; color: var(--muted); font-size: .6875rem; font-style: italic; }
+.reply-quote.reply-unavailable { border-left-color: var(--control-border); cursor: default; }
+.reply-unavailable .reply-quote-name { color: var(--muted); }
+.attachment-card > .reply-quote { grid-column: 1 / -1; grid-row: 1; }
+.attachment-card.has-reply > .message-content { grid-row: 2; }
+.attachment-card.has-reply > .file-tile, .attachment-card.has-reply > .attachment-info, .attachment-card.has-reply > .attachment-download { grid-row: 3; }
+.attachment-card.has-reply > .media-preview { grid-row: 4; }
+.attachment-card.has-reply > .field-error { grid-row: 5; }
+.attachment-card.has-reply > .message-reactions, .attachment-card.has-reply:not(.has-reactions) > .message-footer { grid-row: 6; }
+/* Jumping to the original briefly outlines it; reduced motion keeps a still outline. */
+.message-bubble.reply-highlight { outline: 2px solid transparent; outline-offset: 3px; animation: reply-highlight 1.6s ease-out; }
+@keyframes reply-highlight { from, 35% { outline-color: var(--accent); } }
+@media (prefers-reduced-motion: reduce) { .reply-preview { animation: none; } .message-bubble.reply-highlight { animation: none; outline-color: var(--accent); } }
+@media (forced-colors: active) { .reply-quote, .reply-preview { border-left-color: Highlight; } .message-bubble.reply-highlight { outline-color: Highlight; } }

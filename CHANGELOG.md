@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.25.0 — 2026-11-03
+
+### Web
+
+- Reply to sent and received messages, including files: a Reply button beside the message on desktop, Reply in the reaction bar on touch screens, and a compact preview above the composer with a cancel button (Escape also cancels).
+- Show a quote at the top of each reply; selecting it scrolls to the original and outlines it briefly. Replies to replies quote only the message answered.
+- Send the reply reference and a short quote inside the encrypted message, so the server never sees what is answered; until the original reaches a device, the quote is labelled as quoted by the sender.
+- Keep the reply in the composer per conversation until the message is safely queued; a failed send keeps the text and reply.
+- Clients before 0.25.0 keep replies queued without showing them until they are updated.
+- List who reacted with which emoji in a sent message's details, next to who has read it, so reactions are visible on touch screens too.
+
 ## 0.24.0 — 2026-11-03
 
 ### Web
