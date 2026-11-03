@@ -425,7 +425,12 @@ def test_emoji_layout_keeps_mobile_composer_and_large_emoji_contracts():
             "overscroll-behavior: contain; }") in css
     assert ("@media (max-height: 500px) and (max-width: 760px) { "
             ".emoji-picker { height: 9.5rem; }") in css
-    assert "position: fixed" not in css.split("/* Emoji picker")[1]
+    emoji_section = css.split("/* Emoji picker")[1].split("/* One to three emoji")[0]
+    assert "position: fixed" not in emoji_section
+    # The in-flow panel eases open; reduced motion turns that off.
+    assert "overflow: hidden; animation: emoji-picker-in .16s cubic-bezier(.2, 0, 0, 1); }" in css
+    assert "@keyframes emoji-picker-in { from { height: 0; opacity: 0; } }" in css
+    assert "@media (prefers-reduced-motion: reduce) { .emoji-picker { animation: none; }" in css
     assert ('.message-bubble.emoji-only, .message.mine .message-bubble.emoji-only { '
             'padding: 0 .1rem; background: transparent;') in css
     assert '.message-bubble.emoji-only[data-emoji-count="1"] { font-size: 2.75rem; }' in css
@@ -448,3 +453,28 @@ def test_emoji_catalog_is_a_cached_public_static_file_under_the_unchanged_csp():
     assert catalog.headers["cache-control"] == "public, max-age=3600, must-revalidate"
     assert [group[0] for group in catalog.json()] == [
         "smileys", "nature", "food", "activities", "travel", "objects", "symbols", "flags"]
+
+
+def test_reaction_layout_keeps_status_touch_and_card_contracts():
+    css = (ROOT / "app/static/client.css").read_text()
+    # Chips share the last line with the read mark, which keeps its end position and space.
+    assert ".message.mine .has-reactions > .message-content::after { display: none; }" in css
+    assert (".message.mine .has-reactions > .message-reactions "
+            "{ padding-right: calc(28px + .5rem); }") in css
+    assert (".message-bubble.has-reactions > .message-footer { position: absolute; right: .65rem; "
+            "bottom: .45rem; grid-column: auto; grid-row: auto; margin: 0; }") in css
+    assert ".attachment-card > .message-reactions { grid-column: 1 / -1; grid-row: 5; }" in css
+    # The picker floats beside the message instead of resizing the bubble; motion is optional.
+    assert ".reaction-picker { position: fixed; z-index: 3;" in css
+    assert "@media (prefers-reduced-motion: reduce) { .reaction-picker { animation: none; }" in css
+    # Without hover the trigger stays visible, with room beside bubbles and larger touch targets.
+    assert "@media (hover: none) { .reaction-trigger { opacity: .7; } }" in css
+    assert ".message.mine, .message.theirs { max-width: min(calc(100% - 2.5rem), 34rem); }" in css
+    assert (".message.mine:has(.attachment-card, .link-card), "
+            ".message.theirs:has(.attachment-card, .link-card) "
+            "{ max-width: min(calc(100% - 2.5rem), 24rem); }") in css
+    assert ".reaction-option { width: 44px; height: 44px; }" in css
+    assert ".reaction-trigger:disabled { display: none; }" in css
+    assert '.reaction-chip[aria-pressed="true"], .reaction-option[aria-pressed="true"]' in css
+    script = (ROOT / "app/static/client.js").read_text()
+    assert "innerHTML" not in script and "insertAdjacentHTML" not in script

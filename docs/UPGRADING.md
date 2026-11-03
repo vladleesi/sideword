@@ -20,6 +20,9 @@ cannot guarantee physical erasure from SSDs, old backups, snapshots or host memo
 
 ## Upgrade
 
+0.24.0 adds encrypted reaction messages; clients before 0.24.0 keep them queued without
+acknowledging them until reloaded with matching assets. See [reactions](PROTOCOL.md#reactions).
+
 0.21.0 adds an encrypted link-preview follow-up message; 0.20.0 clients keep those messages
 queued until reloaded with matching assets.
 

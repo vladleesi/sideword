@@ -215,7 +215,8 @@ function pickerHarness({ fetchFails = 0, storage = new Map() } = {}) {
   panel.hidden = true;
   const options = () => grid.querySelectorAll('.emoji-option').filter(node => !node.parentElement.parentElement.hidden);
   const option = value => options().find(node => node.textContent === value);
-  return { doc, input, toggle, panel, search, categories, grid, status, picker, fetches, events, storage, options, option };
+  return { doc, input, toggle, panel, search, categories, grid, status, picker, fetches, events, storage, options, option,
+    context };
 }
 
 test('touch or mouse opening keeps the composer focused and inserts at the caret without closing', async () => {
@@ -442,4 +443,46 @@ test('emoji text survives encryption and payload validation at the exact UTF-8 l
   }
   assert.equal(protocol.MAX_TEXT_BYTES, 16000);
   assert.throws(() => protocol.textPayload(`${'😀'.repeat(4000)}a`));
+});
+
+test('closing eases the panel shut before hiding it, reopening cancels that and reduced motion skips it', async () => {
+  const ui = pickerHarness();
+  const animations = [];
+  ui.panel.offsetHeight = 256;
+  ui.panel.animate = (frames, timing) => {
+    const animation = { frames, timing, cancelled: false, cancel() { animation.cancelled = true; } };
+    animations.push(animation);
+    return animation;
+  };
+  await ui.picker.open(false);
+  ui.search.focus();
+  ui.search.value = 'cat';
+  ui.picker.close();
+  // Still visible while it eases shut, but already reported closed with focus back in the composer.
+  assert.equal(ui.panel.hidden, false);
+  assert.equal(ui.picker.isOpen(), false);
+  assert.equal(ui.toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(ui.doc.activeElement, ui.input);
+  assert.deepEqual(JSON.parse(JSON.stringify(animations[0].frames)),
+    [{ height: '256px', opacity: 1 }, { height: '0px', opacity: 0 }]);
+  assert.equal(animations[0].timing.duration, 140);
+  ui.picker.close(); // A second close while closing does nothing.
+  assert.equal(animations.length, 1);
+  animations[0].onfinish();
+  assert.equal(ui.panel.hidden, true);
+  assert.equal(ui.search.value, '');
+  // Reopening mid-close cancels the animation; the panel never disappears.
+  await ui.picker.open(false);
+  ui.picker.close();
+  const closing = animations[1];
+  await ui.picker.open(false);
+  assert.equal(closing.cancelled, true);
+  assert.equal(closing.onfinish, null);
+  assert.equal(ui.panel.hidden, false);
+  assert.equal(ui.picker.isOpen(), true);
+  // With reduced motion the panel hides at once.
+  ui.context.matchMedia = query => ({ matches: query.includes('reduce') });
+  ui.picker.close();
+  assert.equal(ui.panel.hidden, true);
+  assert.equal(animations.length, 2);
 });

@@ -30,6 +30,10 @@ const SidewordProtocol = (() => {
   // Sender-made link previews travel inside the encrypted text payload; recipients never fetch.
   const MAX_PREVIEW_IMAGE_BYTES = 96 * 1024;
   const PREVIEW_FIELDS = ["url", "title", "description", "site_name", "final_host", "image"];
+  // Reactions: thumbs up, red heart, tears of joy, thinking, crying; exact fully qualified forms.
+  const REACTION_EMOJI = Object.freeze(["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F914}", "\u{1F622}"]);
+  const REACTION_FIELDS = ["v", "type", "target_author", "target", "emoji", "rev"];
+  const REFERENCE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
   function payloadError() {
     return new ProtocolError("Invalid or unsupported message payload. The message was not saved or acknowledged.");
@@ -87,6 +91,16 @@ const SidewordProtocol = (() => {
       validatePreview(payload.preview);
       return payload;
     }
+    if (payload.type === "reaction") {
+      // Sets (emoji) or removes (null) the sender's one reaction to a message in the same chat,
+      // named by its author's public ID and client message ID. The highest `rev` wins.
+      if (!exactKeys(payload, REACTION_FIELDS) || typeof payload.target_author !== "string"
+          || !REFERENCE_ID.test(payload.target_author) || typeof payload.target !== "string"
+          || !REFERENCE_ID.test(payload.target)
+          || !(payload.emoji === null || REACTION_EMOJI.includes(payload.emoji))
+          || !Number.isSafeInteger(payload.rev) || payload.rev < 1) throw payloadError();
+      return payload;
+    }
     const fields = payload.type === "text"
       ? (Object.hasOwn(payload, "preview") ? ["v", "type", "text", "preview"] : ["v", "type", "text"])
       : payload.type === "attachment" ? ["v", "type", "name", "mime", "size", "data"]
@@ -128,6 +142,10 @@ const SidewordProtocol = (() => {
 
   function linkPreviewPayload(target, preview) {
     return validatePayload({ v: 1, type: "link-preview", target, preview });
+  }
+
+  function reactionPayload(targetAuthor, target, emoji, rev) {
+    return validatePayload({ v: 1, type: "reaction", target_author: targetAuthor, target, emoji, rev });
   }
 
   function filePayload(name, mime, bytes) {
@@ -284,6 +302,7 @@ const SidewordProtocol = (() => {
 
   return Object.freeze({ bytesToBase64, base64ToBytes, encryptForRecipient,
     decryptMessage, publicKeyFingerprint, ProtocolError, encodePayload, decodePayload,
-    textPayload, linkPreviewPayload, filePayload, fileReference, validatePayload, attachmentBytes, safeDownloadName,
-    attachmentSendBytes, MAX_FILE_BYTES, MAX_TEXT_BYTES, MAX_SEND_BYTES, MAX_WIRE_CHARS, MAX_PREVIEW_IMAGE_BYTES });
+    textPayload, linkPreviewPayload, reactionPayload, filePayload, fileReference, validatePayload, attachmentBytes, safeDownloadName,
+    attachmentSendBytes, MAX_FILE_BYTES, MAX_TEXT_BYTES, MAX_SEND_BYTES, MAX_WIRE_CHARS, MAX_PREVIEW_IMAGE_BYTES,
+    REACTION_EMOJI });
 })();

@@ -57,6 +57,11 @@ Plaintext JSON has exactly one of these field sets:
   the same chat and sender only, keep the first preview, and show none of these messages.
   Clients before 0.20.0 reject inline previews and clients before 0.21.0 reject follow-ups;
   such messages stay queued until the client is reloaded.
+- Reaction: `{"v":1,"type":"reaction","target_author":"<public ID>","target":"<client message ID>","emoji":"👍","rev":1}`
+  sets or, with `"emoji":null`, removes the sender's one reaction to a message in the same
+  chat. `emoji` is exactly one of 👍 ❤️ (U+2764 U+FE0F) 😂 🤔 😢; `target_author` and `target`
+  are 1–64 ASCII letters, digits, underscores or hyphens; `rev` is a safe integer ≥ 1. See
+  [reactions](#reactions).
 - Attachment: `size` integer 0–1,048,576; `data` canonical padded standard base64,
   decoded length exactly `size`; nonempty `name` at most 255 UTF-16 code units;
   `mime` 0–127 printable ASCII characters, including empty.
@@ -195,6 +200,32 @@ sequences, are kept as written.
 Messages of only one to three emoji (spaces allowed) render larger without a bubble; links,
 files and mixed text render normally. Up to 24 recently used emoji are kept unencrypted in
 this device's `localStorage`, validated on read and removed by Reset device.
+
+### Reactions
+
+Reactions are ordinary encrypted messages to every other current participant, so the relay
+sees only an opaque message: no emoji, target or reaction state. Their small size and timing
+can still suggest a reaction. The reactor is the authenticated envelope sender; payloads
+carry no reactor field. Targets resolve within the envelope's chat only: the author's
+public ID and client message ID, never relay row IDs or local entry IDs.
+
+For each chat, target and reactor, the highest `rev` wins; equal revisions with different
+emoji resolve to the greater emoji string, so every device converges in any arrival order.
+Senders take the next revision after their own durably saved state and send one operation
+at a time. Duplicate, stale and reordered operations therefore cannot restore a removed
+reaction; they change nothing and are acknowledged without storing a new record, because
+the state superseding them is already saved. Operations for messages not received yet are
+kept and apply when the message arrives.
+
+State-changing operations are saved in encrypted local history and rebuilt on reload;
+they never appear in the timeline. Own operations use the normal encrypted outbox, retries
+and pending-send recovery, and show as soon as they are queued. An unsent reaction is
+marked until it is sent or replaced. Participants who join later do not receive earlier
+reactions.
+
+Clients before 0.24.0 reject reaction payloads as unsupported: they keep them queued without
+acknowledging them, show "Message retained for retry", and apply nothing until updated or
+until the content expires.
 
 ## Identity checks and local state
 

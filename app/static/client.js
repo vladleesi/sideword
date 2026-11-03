@@ -97,6 +97,13 @@ const shownPreviews = new Set();
 const receivedMedia = new Map();
 // Message ID -> preview that arrived in a later follow-up from the message's sender.
 const receivedPreviews = new Map();
+// Reactions, rebuilt from encrypted history: chat ID -> target message entry ID -> reactor
+// public ID -> { emoji (null when removed), rev, messageId (own operations only) }.
+const reactionsByChat = new Map();
+const REACTION_NAMES = ["Thumbs up", "Red heart", "Face with tears of joy", "Thinking face", "Crying face"];
+const MAX_REACTION_NAMES = 10;
+let reactionQueue = Promise.resolve();
+let reactionPicker = null;
 const mediaFailures = new Map();
 const mediaUploadStates = new Map();
 let mediaTimer = null;
@@ -177,6 +184,7 @@ elements.messageList.addEventListener("scroll", () => {
   const list = elements.messageList;
   followResizedMessages = list.scrollHeight - list.clientHeight - list.scrollTop <= 32;
   list.setAttribute("data-follow-latest", String(followResizedMessages));
+  positionReactionPicker();
   refreshVisibleReads();
   scheduleVisiblePreviews();
 });
@@ -200,6 +208,7 @@ let workspaceViewportOffsetTop = null;
 function updateWorkspaceViewport() {
   const viewport = window.visualViewport;
   positionMessageDetails();
+  positionReactionPicker();
   if (!viewport || Math.abs(viewport.scale - 1) > .01) return;
   const height = Math.round(viewport.height);
   const offsetTop = Math.max(0, Math.round(viewport.offsetTop || 0));
@@ -748,7 +757,9 @@ async function persistHistoryEntry(chatId, entry, allowed = null) {
 
 async function loadStoredHistory() {
   if (!identity?.storageKey || !identity.publicId) return;
-  if (!messagesByChat.size) { loadedHistoryKeys.clear(); receivedMedia.clear(); receivedPreviews.clear(); revealedImages.clear(); }
+  if (!messagesByChat.size) {
+    loadedHistoryKeys.clear(); receivedMedia.clear(); receivedPreviews.clear(); reactionsByChat.clear(); revealedImages.clear();
+  }
   const records = (await readHistoryRecords()).filter(record => !loadedHistoryKeys.has(record.key));
   // Decrypt in parallel, then append without per-record renders: one layout for the whole load.
   const decrypted = await Promise.all(records.map(async record => {
@@ -1062,10 +1073,11 @@ function outgoingMessageId(entry) {
 }
 
 function hiddenMessageEntry(entry) {
-  return ["receipt", "acceptance", "viewed", "read_ack", "delivery_ack", "delivery_ref", "send_failed", "delivery_state", "media_ready", "link_preview"].includes(entry.kind);
+  return ["receipt", "acceptance", "viewed", "read_ack", "delivery_ack", "delivery_ref", "send_failed", "delivery_state", "media_ready", "link_preview", "reaction"].includes(entry.kind);
 }
 
 function indexMessageMetadata(chatId, entry) {
+  if (entry.kind === "reaction") { indexReaction(chatId, entry); return; }
   if (entry.kind === "link_preview") {
     // First preview wins: a message's card cannot be replaced later.
     if (!receivedPreviews.has(entry.target)) receivedPreviews.set(entry.target, entry.preview);
@@ -1367,6 +1379,357 @@ function updateMessageFooter(node, chatId, entry) {
   }
 }
 
+// Reactions travel as encrypted `reaction` messages to every other participant. Each names its
+// target by author public ID and client message ID; the local key adds this chat's ID.
+function reactionTargetKey(chatId, targetAuthor, targetMessageId) {
+  return targetAuthor === identity?.publicId ? `outgoing:${targetMessageId}`
+    : messageKey({ chat_id: chatId, sender_public_id: targetAuthor, client_message_id: targetMessageId });
+}
+
+function reactionTarget(entry) {
+  if (entry.kind === "mine" && entry.clientMessageId && identity?.publicId) {
+    return { author: identity.publicId, messageId: entry.clientMessageId };
+  }
+  if (entry.kind === "theirs" && entry.senderPublicId && entry.delivery?.client_message_id) {
+    return { author: entry.senderPublicId, messageId: entry.delivery.client_message_id };
+  }
+  return null;
+}
+
+// The highest revision wins; equal revisions resolve by emoji so every device converges.
+function supersedesReaction(candidate, current) {
+  if (!current) return true;
+  if (candidate.rev !== current.rev) return candidate.rev > current.rev;
+  return (candidate.emoji || "") > (current.emoji || "");
+}
+
+function currentReaction(chatId, target, reactorPublicId) {
+  return reactionsByChat.get(chatId)?.get(target)?.get(reactorPublicId) || null;
+}
+
+// Targets that have not arrived yet keep their state and show once the message appears.
+function indexReaction(chatId, entry) {
+  if (typeof entry.target !== "string" || typeof entry.reactorPublicId !== "string"
+      || !Number.isSafeInteger(entry.rev) || entry.rev < 1
+      || !(entry.emoji === null || SidewordProtocol.REACTION_EMOJI.includes(entry.emoji))) return;
+  if (!supersedesReaction(entry, currentReaction(chatId, entry.target, entry.reactorPublicId))) return;
+  let targets = reactionsByChat.get(chatId);
+  if (!targets) reactionsByChat.set(chatId, targets = new Map());
+  let reactors = targets.get(entry.target);
+  if (!reactors) targets.set(entry.target, reactors = new Map());
+  reactors.set(entry.reactorPublicId, { emoji: entry.emoji, rev: entry.rev, messageId: entry.clientMessageId || null });
+}
+
+function reactionsAvailable(chatId) {
+  const chat = chats.find(candidate => candidate.id === chatId);
+  return Boolean(chat && !chat.closed_at && identity?.publicId
+    && !chat.participants.some(peer => peer.key_changed)
+    && chat.participants.some(peer => peer.public_id !== identity.publicId));
+}
+
+// Choosing the current emoji removes it; another replaces it. Operations run one at a time,
+// so each takes the revision after the previous one, which is durably queued first.
+function toggleReaction(chatId, entry, emoji) {
+  reactionQueue = reactionQueue.then(() => sendReaction(chatId, entry, emoji))
+    .catch(error => showToast(errorMessage(error), true));
+  return reactionQueue;
+}
+
+async function sendReaction(chatId, entry, emoji) {
+  const target = reactionTarget(entry);
+  if (!target || !reactionsAvailable(chatId) || !SidewordProtocol.REACTION_EMOJI.includes(emoji)) return;
+  const chat = chats.find(candidate => candidate.id === chatId);
+  const recipients = chat.participants.filter(peer => peer.public_id !== identity.publicId);
+  if (recipients.length > 100) throw new ClientError("This conversation exceeds the recipient limit.");
+  for (const recipient of recipients) await assertTrustedPeer(recipient);
+  const current = currentReaction(chatId, reactionTargetKey(chatId, target.author, target.messageId), identity.publicId);
+  const payload = SidewordProtocol.reactionPayload(target.author, target.messageId,
+    current?.emoji === emoji ? null : emoji, (current?.rev || 0) + 1);
+  await queueEncryptedMessage(chat, recipients, crypto.randomUUID(), payload);
+  try { await flushOutbox(); }
+  finally { await renderOutbox(); }
+}
+
+// Tapping message controls keeps the composer focused so the mobile keyboard stays open.
+function keepComposerFocus(event) {
+  if (document.activeElement === elements.messageInput) event.preventDefault();
+}
+
+function reactionIcon() {
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  for (const [name, value] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+    "stroke-width": "1.5", "stroke-linecap": "round", "aria-hidden": "true", focusable: "false" })) {
+    icon.setAttribute(name, value);
+  }
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M20.5 11.5a8.5 8.5 0 1 1-8-8.5 M8.5 14a4.5 4.5 0 0 0 7 0 M9 9.5h.01 M15 9.5h.01 M19 2v6 M16 5h6");
+  icon.append(path);
+  return icon;
+}
+
+const REACTION_ANIMATION_MS = 160;
+
+// Chips are reused per emoji, so updates change counts in place and keep focus and hover.
+function createReactionChip(node, emoji) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "reaction-chip";
+  const glyph = document.createElement("span");
+  glyph.className = "reaction-emoji";
+  glyph.textContent = emoji;
+  chip.reactionCount = document.createElement("span");
+  chip.reactionCount.className = "reaction-count";
+  chip.append(glyph, chip.reactionCount);
+  chip.addEventListener("mousedown", keepComposerFocus);
+  chip.addEventListener("click", event => {
+    event.stopPropagation();
+    void toggleReaction(node.reactionChatId, node.messageEntry, emoji);
+  });
+  return chip;
+}
+
+function updateReactionChip(chip, emoji, group, available) {
+  const names = group.names.slice(0, MAX_REACTION_NAMES).join(", ")
+    + (group.names.length > MAX_REACTION_NAMES ? ` and ${group.names.length - MAX_REACTION_NAMES} more` : "");
+  const label = `${emoji} ${group.names.length}: ${names}${group.unsent ? ". Your reaction is not sent yet" : ""}`;
+  chip.className = group.unsent ? "reaction-chip reaction-unsent" : "reaction-chip";
+  chip.disabled = !available;
+  chip.setAttribute("aria-pressed", String(group.mine));
+  chip.setAttribute("aria-label", label);
+  chip.title = label;
+  if (chip.reactionCount.textContent !== String(group.names.length)) chip.reactionCount.textContent = String(group.names.length);
+}
+
+// Reactions share the bubble's last line with the delivery status, so they never need their own row.
+function updateReactions(node, chatId, entry) {
+  const target = reactionTarget(entry);
+  if (!target) return;
+  node.reactionChatId = chatId;
+  const firstRender = !node.reactionTrigger;
+  if (firstRender) {
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "reaction-trigger";
+    trigger.title = "React";
+    trigger.setAttribute("aria-label", "Add reaction");
+    trigger.setAttribute("aria-haspopup", "true");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.append(reactionIcon());
+    trigger.addEventListener("mousedown", keepComposerFocus);
+    trigger.addEventListener("click", event => {
+      event.stopPropagation();
+      toggleReactionPicker(node, event.detail === 0);
+    });
+    const row = document.createElement("div");
+    row.className = "message-reactions";
+    row.setAttribute("role", "group");
+    row.setAttribute("aria-label", "Reactions");
+    row.hidden = true;
+    node.messageBubble.insertBefore(row, node.messageFooter || null);
+    node.messageBubble.append(trigger);
+    node.reactionTrigger = trigger;
+    node.reactionRow = row;
+    node.reactionChips = new Map();
+    node.reactionLayout = false;
+  }
+  const chat = chats.find(candidate => candidate.id === chatId);
+  const groups = new Map();
+  for (const [reactor, state] of reactionsByChat.get(chatId)?.get(reactionTargetKey(chatId, target.author, target.messageId)) || []) {
+    if (!state.emoji) continue;
+    const group = groups.get(state.emoji) || { names: [], mine: false, unsent: false };
+    if (reactor === identity?.publicId) {
+      group.mine = true;
+      const metadataId = metadataKey(chatId, state.messageId);
+      group.unsent = outgoingAttempts.get(metadataId) === "failed" && !messageMetadata.get(metadataId)?.acceptance;
+      group.names.unshift("You");
+    } else {
+      const peer = chat?.participants.find(candidate => candidate.public_id === reactor);
+      group.names.push(peer?.display_name?.trim() || "Participant");
+    }
+    groups.set(state.emoji, group);
+  }
+  const available = reactionsAvailable(chatId);
+  const chips = SidewordProtocol.REACTION_EMOJI.filter(emoji => groups.has(emoji))
+    .map(emoji => [emoji, groups.get(emoji)]);
+  const signature = JSON.stringify([available, chips]);
+  if (node.reactionSignature === signature) return;
+  node.reactionSignature = signature;
+  node.reactionTrigger.disabled = !available;
+  if (!available && reactionPicker?.host === node) closeReactionPicker();
+  const membership = chips.map(([emoji]) => emoji).join();
+  const resized = membership !== node.reactionMembership;
+  node.reactionMembership = membership;
+  const change = () => applyReactionChips(node, chips, available);
+  // Only added or removed chips can move the layout; count and label updates happen in place.
+  if (firstRender || !resized) change();
+  else animateReactionChange(node, change);
+}
+
+// Returns chips that were added, for their entrance animation.
+function applyReactionChips(node, chips, available) {
+  const row = node.reactionRow;
+  const added = [];
+  const wanted = new Set(chips.map(([emoji]) => emoji));
+  for (const [emoji, chip] of node.reactionChips) {
+    if (wanted.has(emoji)) continue;
+    // Keep keyboard users on the message when the focused chip disappears.
+    if (document.activeElement === chip) node.reactionTrigger.focus({ preventScroll: true });
+    chip.remove();
+    node.reactionChips.delete(emoji);
+  }
+  chips.forEach(([emoji, group], index) => {
+    let chip = node.reactionChips.get(emoji);
+    if (!chip) {
+      chip = createReactionChip(node, emoji);
+      node.reactionChips.set(emoji, chip);
+      added.push(chip);
+    }
+    updateReactionChip(chip, emoji, group, available);
+    if (row.children[index] !== chip) row.insertBefore(chip, row.children[index] || null);
+  });
+  if (row.hidden !== !chips.length) row.hidden = !chips.length;
+  updateReactionLayout(node);
+  return added;
+}
+
+// The bubble eases to its new size and new chips grow in; offscreen or with reduced motion the
+// change applies at once without moving the reading position.
+function animateReactionChange(node, change) {
+  if (reducedMotion() || !messageInView(node)) {
+    keepScrollPosition(change);
+    return;
+  }
+  const bubble = node.messageBubble;
+  for (const animation of bubble.getAnimations?.() || []) animation.finish();
+  const before = bubble.getBoundingClientRect();
+  const added = change();
+  const after = bubble.getBoundingClientRect();
+  const timing = { duration: REACTION_ANIMATION_MS, easing: "cubic-bezier(.2, 0, 0, 1)" };
+  if (Math.abs(before.width - after.width) >= 1 || Math.abs(before.height - after.height) >= 1) {
+    bubble.animate?.([{ width: `${before.width}px`, height: `${before.height}px`, overflow: "hidden" },
+      { width: `${after.width}px`, height: `${after.height}px`, overflow: "hidden" }], timing);
+  }
+  for (const chip of added) chip.animate?.([{ opacity: 0, transform: "scale(.6)" }, { opacity: 1, transform: "none" }], timing);
+}
+
+function updateReactionLayout(node) {
+  const active = !node.reactionRow.hidden;
+  if (node.reactionLayout === active) return;
+  node.reactionLayout = active;
+  node.messageBubble.classList.toggle("has-reactions", active);
+}
+
+// One shared floating bar beside the message, outside the bubble, so opening it never resizes cards.
+function reactionPickerControl() {
+  if (reactionPicker) return reactionPicker;
+  const node = document.createElement("div");
+  node.className = "reaction-picker";
+  node.setAttribute("role", "group");
+  node.setAttribute("aria-label", "Choose a reaction");
+  node.hidden = true;
+  const buttons = SidewordProtocol.REACTION_EMOJI.map((emoji, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "reaction-option";
+    button.textContent = emoji;
+    button.title = REACTION_NAMES[index];
+    button.setAttribute("aria-label", REACTION_NAMES[index]);
+    button.addEventListener("mousedown", keepComposerFocus);
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      const host = reactionPicker.host;
+      closeReactionPicker(event.detail === 0);
+      if (host) void toggleReaction(host.reactionChatId, host.messageEntry, emoji);
+    });
+    return button;
+  });
+  node.append(...buttons);
+  node.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeReactionPicker(true);
+      return;
+    }
+    // Tab leaves the bar from its trigger, so focus continues in reading order.
+    if (event.key === "Tab") { closeReactionPicker(true); return; }
+    const index = buttons.indexOf(document.activeElement);
+    const next = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: buttons.length - 1 }[event.key];
+    if (index < 0 || next === undefined) return;
+    event.preventDefault();
+    buttons[(next + buttons.length) % buttons.length].focus({ preventScroll: true });
+  });
+  elements.conversation.append(node);
+  reactionPicker = { node, buttons, host: null };
+  return reactionPicker;
+}
+
+function updateReactionPicker(node) {
+  const target = reactionTarget(node.messageEntry);
+  const own = target && currentReaction(node.reactionChatId,
+    reactionTargetKey(node.reactionChatId, target.author, target.messageId), identity?.publicId);
+  let current = null;
+  reactionPicker.buttons.forEach((button, index) => {
+    const pressed = own?.emoji === SidewordProtocol.REACTION_EMOJI[index];
+    button.setAttribute("aria-pressed", String(pressed));
+    if (pressed) current = button;
+  });
+  return current;
+}
+
+// Beside the trigger, toward the free side of the screen; above or below it when that side
+// is too narrow (phones). Closes once its message scrolls out of view.
+function positionReactionPicker() {
+  const host = reactionPicker?.host;
+  if (!host) return;
+  const anchor = host.reactionTrigger.getBoundingClientRect();
+  const bounds = elements.messageList.getBoundingClientRect();
+  if (anchor.bottom < bounds.top || anchor.top > bounds.bottom) { closeReactionPicker(); return; }
+  const picker = reactionPicker.node;
+  const width = picker.offsetWidth || 0;
+  const height = picker.offsetHeight || 0;
+  const gap = 6;
+  const mine = host.messageEntry.kind === "mine";
+  let left = mine ? anchor.left - gap - width : anchor.right + gap;
+  let top = anchor.top + anchor.height / 2 - height / 2;
+  if (left < bounds.left + gap || left + width > bounds.right - gap) {
+    left = mine ? anchor.right - width : anchor.left;
+    top = anchor.top - gap - height >= bounds.top ? anchor.top - gap - height : anchor.bottom + gap;
+  }
+  left = Math.max(bounds.left + gap, Math.min(left, bounds.right - gap - width));
+  top = Math.max(bounds.top + gap, Math.min(top, bounds.bottom - gap - height));
+  picker.style.left = `${Math.round(left)}px`;
+  picker.style.top = `${Math.round(top)}px`;
+}
+
+function toggleReactionPicker(node, moveFocus) {
+  if (reactionPicker?.host === node) { closeReactionPicker(moveFocus); return; }
+  closeReactionPicker();
+  if (!reactionsAvailable(node.reactionChatId)) return;
+  const picker = reactionPickerControl();
+  picker.host = node;
+  picker.node.classList.toggle("from-mine", node.messageEntry.kind === "mine");
+  picker.node.hidden = false;
+  node.reactionTrigger.setAttribute("aria-expanded", "true");
+  const current = updateReactionPicker(node);
+  positionReactionPicker();
+  if (moveFocus) (current || picker.buttons[0]).focus({ preventScroll: true });
+}
+
+function closeReactionPicker(restoreFocus = false) {
+  const host = reactionPicker?.host;
+  if (!host) return;
+  reactionPicker.host = null;
+  reactionPicker.node.hidden = true;
+  host.reactionTrigger.setAttribute("aria-expanded", "false");
+  if (restoreFocus && host.isConnected !== false) host.reactionTrigger.focus({ preventScroll: true });
+}
+
+document.addEventListener("pointerdown", event => {
+  const host = reactionPicker?.host;
+  if (!host || reactionPicker.node.contains(event.target) || host.reactionTrigger.contains(event.target)) return;
+  closeReactionPicker();
+});
 function updateMessageHeader(node, chatId, entry, previous, timestampFormatters) {
   if (!node.messageHeader) return;
   const header = node.messageHeader;
@@ -1488,6 +1851,7 @@ function renderMessages(openAtLatest = false) {
     messageVisibilityObserver?.disconnect();
     visibleMessageNodes.clear();
     refreshVisibleReads();
+    closeReactionPicker();
     for (const node of renderedMessages.values()) messageResizeObserver?.unobserve(node.messageBubble);
     list.replaceChildren();
     renderedMessages.clear();
@@ -1538,6 +1902,7 @@ function renderMessages(openAtLatest = false) {
       else updateLinkPreview(existing, true); // A preview that arrived after the message.
       if (entry.attachment) updateAttachmentCard(existing);
       updateMessageHeader(existing, selectedChatId, entry, previous, timestampFormatters);
+      updateReactions(existing, selectedChatId, entry);
       if (list.children[position] !== existing) list.insertBefore(existing, list.children[position] || null);
       position++;
       continue;
@@ -1613,6 +1978,7 @@ function renderMessages(openAtLatest = false) {
     message.append(bubble);
     messageResizeObserver?.observe(bubble);
     updateMessageHeader(message, chatId, entry, previous, timestampFormatters);
+    updateReactions(message, chatId, entry);
     if (entry.kind === "mine") {
       message.tabIndex = 0;
       message.setAttribute("aria-haspopup", "dialog");
@@ -2578,7 +2944,17 @@ async function processMessages(messages) {
         Object.assign(entry, { kind: "link_preview", target: messageKey({ chat_id: message.chat_id,
           sender_public_id: message.sender_public_id, client_message_id: payload.target }) });
       }
-      await appendMessage(message.chat_id, entry);
+      if (payload.type === "reaction") {
+        // The reactor is the authenticated sender; the target resolves within this chat only.
+        Object.assign(entry, { kind: "reaction", reactorPublicId: message.sender_public_id,
+          target: reactionTargetKey(message.chat_id, payload.target_author, payload.target),
+          emoji: payload.emoji, rev: payload.rev });
+      }
+      // A stale or repeated reaction changes nothing: the state superseding it is already saved.
+      if (entry.kind !== "reaction" || supersedesReaction(entry,
+        currentReaction(message.chat_id, entry.target, entry.reactorPublicId))) {
+        await appendMessage(message.chat_id, entry);
+      }
       seenMessageIds.add(key);
       failedMessageReasons.delete(key);
       failedMessageRetries.delete(key);
@@ -3043,7 +3419,7 @@ elements.activationForm.addEventListener("submit", async (event) => {
       // Persisted history/outbox are scoped by public ID. Keep them for a later
       // reconnect; a new invite must never perform a destructive device reset.
       messagesByChat.clear();
-      receivedMedia.clear(); receivedPreviews.clear();
+      receivedMedia.clear(); receivedPreviews.clear(); reactionsByChat.clear();
       revealedImages.clear();
       mediaUploadStates.clear();
       seenMessageIds.clear();
@@ -3147,7 +3523,8 @@ async function renderOutbox() {
       if (!state) continue; // Normal background delivery needs no recovery panel.
       const payload = SidewordProtocol.validatePayload(record.payload);
       row.textContent = `${state}: ${payload.type === "text" ? payload.text
-        : payload.type === "link-preview" ? "Link preview" : "Attachment"} `;
+        : payload.type === "link-preview" ? "Link preview" : payload.type === "reaction" ? "Reaction"
+          : "Attachment"} `;
     } catch { row.textContent = "Could not read a saved message. "; }
     const discard = document.createElement("button");
     discard.type = "button";
@@ -3258,6 +3635,11 @@ async function storeOutgoing(record) {
   entry.meta = messageMeta(record.chatId, entry);
   if (record.media) entry.attachment = SidewordProtocol.validatePayload(record.media);
   if (record.payload.type === "link-preview") Object.assign(entry, { kind: "link_preview", target: `outgoing:${record.payload.target}` });
+  if (record.payload.type === "reaction") {
+    Object.assign(entry, { kind: "reaction", reactorPublicId: identity.publicId,
+      target: reactionTargetKey(record.chatId, record.payload.target_author, record.payload.target),
+      emoji: record.payload.emoji, rev: record.payload.rev });
+  }
   await appendMessage(record.chatId, entry);
 }
 
@@ -3313,6 +3695,7 @@ async function recoverMessageStatuses() {
 function payloadEntry(payload) {
   if (payload.type === "attachment" || payload.type === "attachment-ref") return { attachment: payload, text: payload.text || "" };
   if (payload.type === "link-preview") return { preview: payload.preview };
+  if (payload.type === "reaction") return {};
   return payload.preview ? { text: payload.text, preview: payload.preview } : { text: payload.text };
 }
 

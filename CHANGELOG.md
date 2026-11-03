@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.24.0 — 2026-11-03
+
+### Web
+
+- Add end-to-end encrypted reactions with 👍 ❤️ 😂 🤔 😢 to sent and received messages, including files, from a small picker that opens beside the message: one reaction per participant, shown as grouped chips with counts on the same line as the read mark and your own highlighted; choosing it again removes it and another emoji replaces it.
+- Update reaction chips in place: counts change without redrawing, and new chips grow in smoothly unless reduced motion is preferred.
+- Send reactions as encrypted messages through the normal outbox, so the server never sees the emoji or which message they belong to; they appear once queued, are marked when not sent, and are rebuilt from encrypted history after reload.
+- Apply reactions in a fixed order per participant, so duplicate, delayed or reordered deliveries cannot bring back a removed reaction; reactions to messages that arrive later appear once those messages do.
+- Clients before 0.24.0 keep reactions queued unacknowledged until they are updated.
+- Open and close the composer's emoji picker with a short height and fade animation instead of an abrupt jump, unless reduced motion is preferred.
+
 ## 0.23.0 — 2026-11-03
 
 ### Web

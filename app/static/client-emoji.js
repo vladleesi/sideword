@@ -19,6 +19,8 @@
   // Messages of one to three emoji are shown larger; longer text never qualifies.
   const MAX_LARGE_EMOJI = 3;
   const MAX_LARGE_TEXT_LENGTH = 128;
+  // Closing eases the panel shut; opening uses the matching CSS animation.
+  const CLOSE_ANIMATION_MS = 140;
   // One displayed emoji: a tag-sequence flag, keycap, country flag, or a (ZWJ sequence of)
   // pictographs shown as emoji by default, with VS16 or with a skin tone. Text-style symbols
   // such as "©" or "1" without VS16 and unpaired regional indicators stay ordinary text.
@@ -152,6 +154,7 @@
     let recentSection = null;
     let resultsSection = null;
     const sections = [];
+    let closing = null;
 
     function section(id, label) {
       const node = document.createElement("div");
@@ -252,6 +255,8 @@
     }
 
     function open(moveFocus) {
+      // Reopening while it eases shut keeps the panel where it is.
+      if (closing) { closing.onfinish = null; closing.cancel(); closing = null; }
       panel.hidden = false;
       toggle.setAttribute("aria-expanded", "true");
       if (moveFocus) search.focus({ preventScroll: true });
@@ -268,12 +273,20 @@
     }
 
     function close(restoreFocus = false) {
-      if (panel.hidden) return;
+      if (panel.hidden || closing) return;
       const focusInside = panel.contains(document.activeElement);
-      panel.hidden = true;
       toggle.setAttribute("aria-expanded", "false");
-      if (search.value) { search.value = ""; showResults(); }
       if ((restoreFocus || focusInside) && !input.disabled) input.focus({ preventScroll: true });
+      const finish = () => {
+        closing = null;
+        panel.hidden = true;
+        if (search.value) { search.value = ""; showResults(); }
+      };
+      const reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      if (reducedMotion || typeof panel.animate !== "function") { finish(); return; }
+      closing = panel.animate([{ height: `${panel.offsetHeight}px`, opacity: 1 }, { height: "0px", opacity: 0 }],
+        { duration: CLOSE_ANIMATION_MS, easing: "cubic-bezier(.2, 0, 0, 1)" });
+      closing.onfinish = finish;
     }
 
     function choose(button) {
@@ -341,7 +354,7 @@
 
     return {
       open, close, choose,
-      isOpen: () => !panel.hidden,
+      isOpen: () => !panel.hidden && !closing,
       setEnabled(enabled) { toggle.disabled = !enabled; if (!enabled) close(); },
     };
   }
