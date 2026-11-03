@@ -5,8 +5,8 @@ web client share one application release; HTTP API, WebSocket, message payload a
 cryptographic envelope versions remain independent. See
 [version meanings](../CONTRIBUTING.md#application-and-contract-versions).
 `client-protocol.js` owns Web Crypto/payload operations; `client-media.js` owns local
-preview validation/resources; `client-links.js` owns link detection; `client.js` owns
-trust, DOM, networking and persistence.
+preview validation/resources; `client-links.js` owns link detection; `client-emoji.js` owns
+emoji detection and the picker; `client.js` owns trust, DOM, networking and persistence.
 See [security limits](SECURITY_REVIEW.md).
 
 ## Wire representation
@@ -182,6 +182,19 @@ images locally, and always show the link's own host. Preview text is sender-cont
 be misleading, like any message text. Text renders with `textContent`; images are shown from
 Blob URLs. The setting also hides received previews; without one, nothing is shown under the
 link.
+
+### Emoji
+
+Emoji are ordinary Unicode text in the `text` payload; there is no emoji payload type. The
+picker loads a same-origin static catalog of standard (RGI) emoji in default skin tone on
+first open and inserts one whole emoji at the caret or over the selection, widened to whole
+grapheme clusters. It refuses an emoji that would exceed the 16,000-byte or 16,000-character
+limit instead of truncating it. Typed or pasted emoji, including skin tones, flags and ZWJ
+sequences, are kept as written.
+
+Messages of only one to three emoji (spaces allowed) render larger without a bubble; links,
+files and mixed text render normally. Up to 24 recently used emoji are kept unencrypted in
+this device's `localStorage`, validated on read and removed by Reset device.
 
 ## Identity checks and local state
 

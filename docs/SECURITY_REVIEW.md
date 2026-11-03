@@ -52,6 +52,9 @@ bearer tokens are stored unencrypted in IndexedDB beside the non-exportable keys
 script or device access can read them. Encrypting them with a key stored beside them would
 not protect against either; moving refresh credentials to HttpOnly cookies needs an API change. Optional downloads export ordinary local files that
 revocation/deletion cannot erase. Card viewing does not confirm file opening.
+Recently used emoji (at most 24) are stored unencrypted in `localStorage` and reveal
+usage to anyone with device or same-origin script access; Reset device removes them.
+They are validated before rendering as text ([tests](../tests/client_emoji.test.cjs)).
 
 ## Prioritized findings and improvements
 

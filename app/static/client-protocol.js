@@ -285,5 +285,5 @@ const SidewordProtocol = (() => {
   return Object.freeze({ bytesToBase64, base64ToBytes, encryptForRecipient,
     decryptMessage, publicKeyFingerprint, ProtocolError, encodePayload, decodePayload,
     textPayload, linkPreviewPayload, filePayload, fileReference, validatePayload, attachmentBytes, safeDownloadName,
-    attachmentSendBytes, MAX_FILE_BYTES, MAX_SEND_BYTES, MAX_WIRE_CHARS, MAX_PREVIEW_IMAGE_BYTES });
+    attachmentSendBytes, MAX_FILE_BYTES, MAX_TEXT_BYTES, MAX_SEND_BYTES, MAX_WIRE_CHARS, MAX_PREVIEW_IMAGE_BYTES });
 })();

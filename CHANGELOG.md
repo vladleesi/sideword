@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.23.0 — 2026-11-03
+
+### Web
+
+- Add an emoji picker to the composer with categories, search and recently used emoji; it inserts at the cursor or over the selection, keeps the draft and works with mouse, keyboard and touch without closing the mobile keyboard.
+- Show messages of one to three emoji larger and without a bubble; emoji stay ordinary text in the encrypted message, so sending, limits, retries, receipts and link previews are unchanged.
+- Load the emoji list only when the picker first opens, and refuse an emoji that would exceed the 16,000-byte message limit instead of cutting it.
+
 ## 0.22.3 — 2026-11-02
 
 ### Web

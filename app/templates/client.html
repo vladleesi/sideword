@@ -12,11 +12,12 @@
   <link rel="preload" href="/static/fonts/IBMPlexSans-SemiBold.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
   <script src="/static/appearance.js?v=2"></script>
-  <link rel="stylesheet" href="/static/client.css?v=45">
-  <script src="/static/client-protocol.js?v=7" defer></script>
+  <link rel="stylesheet" href="/static/client.css?v=46">
+  <script src="/static/client-protocol.js?v=8" defer></script>
   <script src="/static/client-media.js?v=9" defer></script>
   <script src="/static/client-links.js?v=2" defer></script>
-  <script src="/static/client.js?v=64" defer></script>
+  <script src="/static/client-emoji.js?v=1" defer></script>
+  <script src="/static/client.js?v=65" defer></script>
 </head>
 <body class="messenger">
   <a class="skip-link" href="#workspace">Skip to workspace</a>
@@ -122,12 +123,21 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m21 11.5-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8L15 6.3"/></svg>
           </button>
           <span id="attachment-help" class="sr-only">Choose, paste or drop one file up to 1 MiB. Larger JPEG, PNG and WebP images up to 20 MiB are reduced on this device before you send. Add an optional message above the attachment.</span>
+          <button id="emoji-button" class="button subtle icon-button" type="button" aria-label="Emoji" aria-expanded="false" aria-controls="emoji-picker" title="Emoji" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01" stroke-width="2.25"/></svg>
+          </button>
           <label class="sr-only" for="message-input">Message</label>
           <textarea id="message-input" maxlength="16000" rows="2" enterkeyhint="send" aria-describedby="composer-help composer-error key-change-warning waiting-notice"
                     placeholder="Write a message" disabled></textarea>
           <button id="send-button" class="button primary" type="submit" disabled>Send</button>
           <p id="composer-error" class="field-error" role="alert" hidden></p>
           <small id="composer-help">Enter to send · Shift+Enter for a new line</small>
+          <div id="emoji-picker" class="emoji-picker" role="group" aria-label="Emoji picker" hidden>
+            <input id="emoji-search" type="search" aria-label="Search emoji" placeholder="Search emoji" maxlength="40" autocomplete="off" spellcheck="false">
+            <div id="emoji-categories" class="emoji-categories" role="group" aria-label="Emoji categories"></div>
+            <div id="emoji-grid" class="emoji-grid"></div>
+            <p id="emoji-status" class="emoji-status" role="status" aria-live="polite"></p>
+          </div>
         </form>
       </section>
       <section id="pending-sends" class="pending-sends" hidden aria-labelledby="pending-sends-title">

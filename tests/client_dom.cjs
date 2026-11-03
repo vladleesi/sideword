@@ -57,6 +57,7 @@ function client({ mobile = false, clipboardBlocked = false, viewportAware = fals
       this.parent = null;
     }
     focus(options) { document.activeElement = this; this.focusOptions = options; }
+    contains(node) { for (; node; node = node.parent) if (node === this) return true; return false; }
     querySelector(selector) {
       for (const child of this.children) {
         if (selector === '.active' && child.className?.split(' ').includes('active')) return child;
@@ -131,6 +132,7 @@ function client({ mobile = false, clipboardBlocked = false, viewportAware = fals
   vm.runInContext(fs.readFileSync('app/static/client-protocol.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('app/static/client-media.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('app/static/client-links.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('app/static/client-emoji.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('app/static/client.js', 'utf8')
     .replace(/start\(\)\.catch[^\n]+/, ''), context);
   const run = code => vm.runInContext(code, context);

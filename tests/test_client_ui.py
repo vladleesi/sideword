@@ -374,3 +374,77 @@ def test_client_pages_share_the_current_stylesheet_and_viewport_fallbacks():
             earlier = re.findall(rf"(?:^|[;{{\s]){re.escape(match[1])}:\s*([^;{{}}]*);",
                                  line[:match.start()])
             assert any(re.search(r"\d+vh\b", value) for value in earlier), line
+
+
+def test_emoji_picker_is_local_accessible_and_in_the_composer_flow():
+    html = (ROOT / "app/templates/client.html").read_text()
+    tree = Structure(html)
+    form = tree.by_id("message-form")
+    button = tree.by_id("emoji-button")
+    picker = tree.by_id("emoji-picker")
+    assert form in button["parents"] and form in picker["parents"]
+    assert button["attrs"]["type"] == "button"
+    assert button["attrs"]["aria-label"] == "Emoji"
+    assert button["attrs"]["aria-expanded"] == "false"
+    assert button["attrs"]["aria-controls"] == "emoji-picker"
+    assert "disabled" in button["attrs"]
+    icons = [node for node in tree.nodes if node["tag"] == "svg" and node["parents"][-1] is button]
+    assert len(icons) == 1 and icons[0]["attrs"]["aria-hidden"] == "true"
+    assert "hidden" in picker["attrs"] and picker["attrs"]["aria-label"] == "Emoji picker"
+    # The picker follows the field and Send in DOM order, so focus order matches the layout.
+    order = [node["attrs"].get("id") for node in tree.nodes]
+    expected = ["attachment-button", "emoji-button", "message-input", "send-button", "emoji-picker"]
+    assert [order.index(identifier) for identifier in expected] == sorted(
+        order.index(identifier) for identifier in expected)
+    search = tree.by_id("emoji-search")
+    assert picker in search["parents"]
+    assert search["attrs"]["aria-label"] == "Search emoji"
+    assert search["attrs"]["maxlength"] == "40"
+    assert tree.by_id("emoji-status")["attrs"]["role"] == "status"
+    assert html.index("/static/client-emoji.js") < html.index("/static/client.js")
+    script = (ROOT / "app/static/client-emoji.js").read_text()
+    # DOM properties only; the catalog is the file's only request and needs no credentials.
+    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(",
+                 "new Function", "http:", "https:"):
+        assert sink not in script
+    assert 'CATALOG_URL = "/static/emoji-catalog.json?v=1"' in script
+    assert 'credentials: "omit"' in script
+
+
+def test_emoji_layout_keeps_mobile_composer_and_large_emoji_contracts():
+    css = (ROOT / "app/static/client.css").read_text()
+    assert ".composer { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto;" in css
+    assert ".composer.has-attachment #emoji-button { grid-column: 2; grid-row: 2; }" in css
+    assert ".composer.has-attachment #send-button { grid-column: 4; grid-row: 2;" in css
+    assert (".composer.has-attachment #attachment-button, "
+            ".composer.has-attachment #emoji-button,") in css
+    # In-flow panel: bounded by the visual viewport, scrolls internally, never covers the field.
+    assert ".emoji-picker { grid-column: 1 / -1;" in css
+    assert "height: min(16rem, 40vh); height: min(16rem, 40dvh);" in css
+    assert (".emoji-grid { position: relative; min-height: 0; overflow-y: auto; "
+            "overscroll-behavior: contain; }") in css
+    assert ("@media (max-height: 500px) and (max-width: 760px) { "
+            ".emoji-picker { height: 9.5rem; }") in css
+    assert "position: fixed" not in css.split("/* Emoji picker")[1]
+    assert ('.message-bubble.emoji-only, .message.mine .message-bubble.emoji-only { '
+            'padding: 0 .1rem; background: transparent;') in css
+    assert '.message-bubble.emoji-only[data-emoji-count="1"] { font-size: 2.75rem; }' in css
+    # Outranks the sender status spacer (0,3,1) so large emoji do not reserve a text line.
+    assert ".message.mine .emoji-only > .message-content::after { display: none; }" in css
+    assert ".emoji-only > .message-footer { position: static;" in css
+    assert '--emoji: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;' in css
+
+
+def test_emoji_catalog_is_a_cached_public_static_file_under_the_unchanged_csp():
+    with TestClient(create_app(), base_url="https://testserver") as client:
+        page = client.get("/client")
+        policy = page.headers["content-security-policy"]
+        assert "connect-src 'self'" in policy and "trusted-types 'none'" in policy
+        catalog = client.get("/static/emoji-catalog.json?v=1", headers={"Accept-Encoding": "gzip"})
+        script = client.get("/static/client-emoji.js?v=1")
+    assert catalog.status_code == 200 and script.status_code == 200
+    assert catalog.headers["content-type"].startswith("application/json")
+    assert catalog.headers["content-encoding"] == "gzip"
+    assert catalog.headers["cache-control"] == "public, max-age=3600, must-revalidate"
+    assert [group[0] for group in catalog.json()] == [
+        "smileys", "nature", "food", "activities", "travel", "objects", "symbols", "flags"]

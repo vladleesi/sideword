@@ -25,6 +25,7 @@
   --theirs: #ECEBE5;
   --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
   --mono: "IBM Plex Mono", Consolas, monospace;
+  --emoji: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
   font-family: var(--sans);
   font-size: 16px;
   line-height: 1.5;
@@ -138,7 +139,7 @@ h3 { font-size: .9rem; font-weight: 600; }
 .message-status.status-read { color: var(--signature); }
 .message-status.status-failed, .message-status.status-pending { color: var(--danger); }
 .message.mine:focus-visible, .message-status:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.composer { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .35rem .65rem; align-items: end; flex-shrink: 0; padding: .75rem max(1rem, calc((100% - 820px) / 2)); padding-bottom: max(.75rem, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
+.composer { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: .35rem .65rem; align-items: end; flex-shrink: 0; padding: .75rem max(1rem, calc((100% - 820px) / 2)); padding-bottom: max(.75rem, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
 input:not([type="radio"]), textarea { width: 100%; min-width: 0; border: 1px solid var(--control-border); border-radius: 2px; background: var(--bg); color: var(--text); padding: .65rem .75rem; }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 input[aria-invalid="true"] { border-color: var(--danger); }
@@ -273,9 +274,9 @@ textarea:disabled { color: var(--muted); }
 #composer-help, #composer-error, #attachment-preview { grid-column: 1 / -1; }
 .composer .icon-button { width: 44px; padding: .6rem; border-radius: 50%; }
 .icon-button svg { display: block; width: 22px; height: 22px; flex-shrink: 0; }
-#attachment-button { color: var(--muted); align-self: center; border: 1px solid var(--border); background: var(--surface); }
-#attachment-button:hover:not(:disabled), #attachment-button:focus-visible { color: var(--text); border-color: var(--control-border); background: var(--surface-alt); }
-#attachment-button:disabled { opacity: .5; }
+#attachment-button, #emoji-button { color: var(--muted); align-self: center; border: 1px solid var(--border); background: var(--surface); }
+#attachment-button:hover:not(:disabled), #attachment-button:focus-visible, #emoji-button:hover:not(:disabled), #emoji-button:focus-visible, #emoji-button[aria-expanded="true"] { color: var(--text); border-color: var(--control-border); background: var(--surface-alt); }
+#attachment-button:disabled, #emoji-button:disabled { opacity: .5; }
 .attachment-selection { display: grid; grid-template-columns: 40px minmax(0, 1fr) 44px; align-items: center; gap: .75rem; padding: .75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); min-width: 0; }
 .attachment-info { min-width: 0; text-align: left; }
 .attachment-caption { display: block; margin-bottom: .2rem; color: var(--muted); font-family: var(--mono); font-size: .625rem; letter-spacing: .035em; text-transform: uppercase; }
@@ -285,10 +286,11 @@ textarea:disabled { color: var(--muted); }
 .file-icon { display: block; width: 23px; height: 27px; }
 #attachment-cancel { color: var(--muted); align-self: start; }
 #attachment-cancel:hover:not(:disabled) { color: var(--text); }
-.composer.has-attachment #attachment-preview { grid-column: 2; grid-row: 1; }
-.composer.has-attachment #message-input { grid-column: 2; grid-row: 2; }
+.composer.has-attachment #attachment-preview { grid-column: 3; grid-row: 1; }
+.composer.has-attachment #message-input { grid-column: 3; grid-row: 2; }
 .composer.has-attachment #attachment-button { grid-column: 1; grid-row: 2; }
-.composer.has-attachment #send-button { grid-column: 3; grid-row: 2; align-self: center; }
+.composer.has-attachment #emoji-button { grid-column: 2; grid-row: 2; }
+.composer.has-attachment #send-button { grid-column: 4; grid-row: 2; align-self: center; }
 /* One compact attachment card below an optional text message. */
 /* No row gap: hidden text/error rows must not add space, so sender and receiver cards match. */
 .attachment-card { display: grid; grid-template-columns: 28px minmax(0, 1fr) 32px; align-items: center; gap: 0 .4rem; width: fit-content; min-width: 16.5rem; max-width: 100%; padding: .4rem; border: 1px solid var(--border); border-radius: 6px; }
@@ -313,11 +315,11 @@ textarea:disabled { color: var(--muted); }
 .message-status.status-expired, .message-status.status-unavailable { color: var(--danger); }
 @media (max-width: 560px) {
   .composer.has-attachment #attachment-preview { grid-column: 1 / -1; grid-row: 1; }
-  .composer.has-attachment #attachment-button, .composer.has-attachment #send-button { grid-row: 2; }
+  .composer.has-attachment #attachment-button, .composer.has-attachment #emoji-button, .composer.has-attachment #send-button { grid-row: 2; }
   .attachment-selection { padding: .6rem; }
 }
 @media (forced-colors: active) {
-  .file-tile, #attachment-button, .attachment-card .attachment-download { border-color: ButtonText; }
+  .file-tile, #attachment-button, #emoji-button, .attachment-card .attachment-download { border-color: ButtonText; }
   #composer-error, .attachment-card .field-error, .viewer-error { border-color: CanvasText; color: CanvasText; background: Canvas; }
 }
 
@@ -407,3 +409,30 @@ textarea:disabled { color: var(--muted); }
   .link-card { border-color: LinkText; }
   .link-card.suspicious-link, .link-warning { border-color: CanvasText; color: CanvasText; }
 }
+
+/* Emoji picker: an in-flow panel below the composer field, so the on-screen keyboard and
+   the visual-viewport layout keep working; emoji glyphs come from the system emoji font. */
+.emoji-picker { grid-column: 1 / -1; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: .35rem; height: 16rem; height: min(16rem, 40vh); height: min(16rem, 40dvh); padding: .4rem; border: 1px solid var(--border); border-radius: 2px; background: var(--surface); }
+#emoji-search { min-height: 36px; padding: .35rem .6rem; font-size: .875rem; }
+.emoji-categories { display: flex; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--border); }
+.emoji-category { flex: 1 0 auto; min-width: 36px; min-height: 36px; padding: 0 .25rem; border: 0; border-bottom: 2px solid transparent; background: transparent; font-family: var(--emoji); font-size: 1.125rem; line-height: 1; cursor: pointer; }
+.emoji-category:hover, .emoji-category:focus-visible { border-bottom-color: var(--accent); }
+.emoji-category:focus-visible { outline-offset: -2px; }
+.emoji-grid { position: relative; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.emoji-section-title { margin: .35rem .15rem .15rem; color: var(--muted); font-family: var(--mono); font-size: .625rem; letter-spacing: .04em; text-transform: uppercase; }
+.emoji-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(2.5rem, 1fr)); }
+.emoji-option { display: grid; place-items: center; height: 2.5rem; padding: 0; border: 0; border-radius: 2px; background: transparent; color: var(--text); font-family: var(--emoji); font-size: 1.5rem; line-height: 1; cursor: pointer; }
+.emoji-option:hover, .emoji-option:focus-visible { background: var(--surface-alt); }
+.emoji-option:focus-visible { outline-offset: -2px; }
+.emoji-status { color: var(--muted); font-size: .75rem; }
+.emoji-status:empty { display: none; }
+@media (max-width: 760px) { .emoji-picker { height: 14rem; height: min(14rem, 36vh); height: min(14rem, 36dvh); } }
+@media (max-height: 500px) and (max-width: 760px) { .emoji-picker { height: 9.5rem; } .emoji-categories { display: none; } }
+@media (forced-colors: active) { .emoji-picker { border-color: CanvasText; } .emoji-category:hover, .emoji-category:focus-visible { border-bottom-color: Highlight; } }
+
+/* One to three emoji alone: larger glyphs without a bubble; status moves below them. */
+.message-bubble.emoji-only, .message.mine .message-bubble.emoji-only { padding: 0 .1rem; background: transparent; font-size: 2.25rem; line-height: 1.2; }
+.message-bubble.emoji-only[data-emoji-count="1"] { font-size: 2.75rem; }
+.emoji-only > .message-content { font-family: var(--emoji); }
+.message.mine .emoji-only > .message-content::after { display: none; }
+.emoji-only > .message-footer { position: static; font-size: .9375rem; line-height: 1.45; }

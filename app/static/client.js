@@ -58,6 +58,8 @@ const elements = {
   attachmentCancel: document.querySelector("#attachment-cancel"),
   attachmentTile: document.querySelector("#attachment-tile"),
   composerError: document.querySelector("#composer-error"),
+  emojiButton: document.querySelector("#emoji-button"),
+  emojiPicker: document.querySelector("#emoji-picker"),
   messageForm: document.querySelector("#message-form"),
   messageInput: document.querySelector("#message-input"),
   messageList: document.querySelector("#message-list"),
@@ -125,6 +127,8 @@ const imageViewer = { token: 0, entry: null, chatId: null, trigger: null, image:
   width: 0, height: 0, zoom: 1 };
 const composerPreview = { token: 0, image: null, url: null, optimizing: false };
 let transferringMedia = false;
+// Created once the composer handlers below are defined.
+let emojiPicker = null;
 let transferController = null;
 let identity = null;
 let chats = [];
@@ -1719,6 +1723,16 @@ function renderMessageText(message, messageText) {
   const links = message.messageEntry.kind === "system" ? [] : globalThis.SidewordLinks?.findLinks(messageText) || [];
   message.messageText = messageText;
   message.messageLinks = links;
+  // One to three emoji alone are shown larger; text, links, files and system notes are not.
+  const entry = message.messageEntry;
+  const largeEmoji = entry.kind === "system" || entry.attachment || links.length ? 0
+    : globalThis.SidewordEmoji?.largeEmojiCount(messageText) || 0;
+  if ((message.largeEmoji || 0) !== largeEmoji) {
+    message.largeEmoji = largeEmoji;
+    message.messageBubble.classList.toggle("emoji-only", largeEmoji > 0);
+    if (largeEmoji) message.messageBubble.dataset.emojiCount = String(largeEmoji);
+    else delete message.messageBubble.dataset.emojiCount;
+  }
   if (!links.length) content.textContent = messageText;
   else {
     const parts = [];
@@ -2369,6 +2383,7 @@ function selectChat(chatId, openAtLatest = false) {
   elements.sendButton.disabled = !canSend || sendingMessage || composerPreview.optimizing;
   elements.attachmentButton.disabled = !canSend || sendingMessage;
   elements.attachmentInput.disabled = !canSend || sendingMessage;
+  emojiPicker?.setEnabled(canSend);
   elements.messageInput.hidden = false;
   elements.messageForm.classList.toggle("has-attachment", Boolean(selectedFile));
   elements.sendButton.textContent = sendingMessage ? "Sending…" : composerPreview.optimizing ? "Reducing…"
@@ -3083,6 +3098,17 @@ elements.activationForm.addEventListener("submit", async (event) => {
   }
 });
 
+// Picked emoji are inserted as plain text into the draft, so sending is unchanged.
+const EMOJI_LIMIT_MESSAGE = "This emoji would make the message longer than the 16,000-byte limit.";
+emojiPicker = globalThis.SidewordEmoji?.createPicker({
+  toggle: elements.emojiButton, panel: elements.emojiPicker, input: elements.messageInput,
+  search: document.querySelector("#emoji-search"), categories: document.querySelector("#emoji-categories"),
+  grid: document.querySelector("#emoji-grid"), status: document.querySelector("#emoji-status"),
+  maxBytes: SidewordProtocol.MAX_TEXT_BYTES,
+  onLimit: () => composerError(EMOJI_LIMIT_MESSAGE),
+  onInsert: () => { if (elements.composerError.textContent === EMOJI_LIMIT_MESSAGE) composerError(); },
+});
+
 elements.messageInput.addEventListener("input", event => {
   syncDraftLinkPreviews({ immediate: ["insertFromPaste", "insertFromDrop"].includes(event.inputType) });
 });
@@ -3658,6 +3684,7 @@ elements.resetButton.addEventListener("click", async () => {
   if (!confirmed) return;
   try {
     await clearIdentity();
+    globalThis.SidewordEmoji?.forgetRecent();
     window.location.assign("/client");
   } catch (error) {
     showToast(errorMessage(error), true);
